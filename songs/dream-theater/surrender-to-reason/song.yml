@@ -1,0 +1,36 @@
+metadata:
+  title: Surrender to Reason
+  file-include: ../../../albums/dream-theater.yml
+  track-number: 7
+  author: Onyxite
+audio:
+  hdtracks-track:
+    md5: f551f2c0303345593e62b6d972feae9e
+    frames: 37897210
+  hihat:
+    file-path: ../../../sound/hihat-foot.wav
+  countin:
+    samples: {}
+plans:
+  hdtracks:
+    song:
+      mix:
+      - countin
+      - pad:
+        - 3.474
+        - channels:
+          - [1, 0]
+          - hdtracks-track
+parts:
+  drums:
+    drums:
+      kicks: both
+      mode: elite
+targets:
+  rb3:
+    game: rb3
+  rb3-2x:
+    game: rb3
+    2x-bass-pedal: true
+  ps:
+    game: ps
