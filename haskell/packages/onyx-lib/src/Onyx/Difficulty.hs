@@ -151,11 +151,12 @@ difficultyPS ps songYaml = let
     Just mode -> case mode.difficulty of
       Tier t -> t
       Rank r -> rankToTier dmap r
-  psRhythmTier     = simpleTier ps.rhythm     (.grybo) guitarDiffMap
-  psGuitarCoopTier = simpleTier ps.guitarCoop (.grybo) guitarDiffMap
-  psDanceTier      = simpleTier ps.dance      (.mania) drumsDiffMap
-  chGuitarGHLTier  = simpleTier ps.guitar     (.ghl  ) guitarDiffMap
-  chBassGHLTier    = simpleTier ps.bass       (.ghl  ) guitarDiffMap
+  psRhythmTier     = simpleTier ps.rhythm     (.grybo)     guitarDiffMap
+  psGuitarCoopTier = simpleTier ps.guitarCoop (.grybo)     guitarDiffMap
+  psDanceTier      = simpleTier ps.dance      getLastMania drumsDiffMap
+  chGuitarGHLTier  = simpleTier ps.guitar     (.ghl  )     guitarDiffMap
+  chBassGHLTier    = simpleTier ps.bass       (.ghl  )     guitarDiffMap
+  getLastMania part = NE.last . (.charts) <$> part.mania
   in DifficultyPS{..}
 
 -- tiers go from 1 to 10, or 0 for no part

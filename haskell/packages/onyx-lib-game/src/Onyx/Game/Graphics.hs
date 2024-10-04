@@ -63,8 +63,8 @@ import qualified Onyx.MIDI.Track.ProGuitar    as PG
 import           Onyx.Preferences             (EliteDrumLayoutHint (..),
                                                Preferences (..),
                                                readPreferences)
-import           Onyx.Project                 (DrumMode (..), ModeMania (..),
-                                               VideoInfo (..))
+import           Onyx.Project                 (DrumMode (..), ManiaChart (..),
+                                               ManiaStyle (..), VideoInfo (..))
 import           Onyx.Resources               (getResourcesPath)
 import           Onyx.StackTrace              (QueueLog, SendMessage,
                                                StackTraceT, errorToWarning,
@@ -1294,8 +1294,8 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
 
 data ManiaColor = ManiaRed | ManiaWhite | ManiaBlack
 
-drawMania :: GLStuff -> Double -> Double -> ModeMania -> Map.Map Double (CommonState ManiaState) -> IO ()
-drawMania glStuff@GLStuff{..} nowTime speed pmania trk = do
+drawMania :: GLStuff -> Double -> Double -> ManiaChart -> Map.Map Double (CommonState ManiaState) -> IO ()
+drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
   glUseProgram objectShader
   -- view and projection matrices should already have been set
   let drawObject' = drawObject glStuff
@@ -1330,27 +1330,27 @@ drawMania glStuff@GLStuff{..} nowTime speed pmania trk = do
             gfxConfig.track.y
             (z + gfxConfig.track.beats.z_future)
           in drawObject' Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
-      keys = take pmania.keys $ [ManiaRed | pmania.turntable] <> cycle [ManiaWhite, ManiaBlack]
+      keys = take mchart.keys $ [ManiaRed | mchart.style == ManiaTurntable] <> cycle [ManiaWhite, ManiaBlack]
       keyColor i = case drop i keys of
         color : _ -> color
         []        -> ManiaRed -- shouldn't happen
-      keyWidth = 1 / fromIntegral pmania.keys
+      keyWidth = 1 / fromIntegral mchart.keys
       keyBounds :: Int -> (Float, Float)
       keyBounds n = (fracToX $ fromIntegral n * keyWidth, fracToX $ fromIntegral (n + 1) * keyWidth)
       drawSustain t1 t2 color key
         | t2 <= nowTime = return ()
         | otherwise     = let
-          boxColor = case pmania.instrument of
-            Nothing -> case color of
-              ManiaRed   -> sc.red
-              ManiaWhite -> sc.blue
-              ManiaBlack -> sc.purple
-            Just inst -> case inst of
+          boxColor = case mchart.style of
+            ManiaAmplitude inst -> case inst of
               Amp.Drums  -> sc.red
               Amp.Bass   -> sc.blue
               Amp.Synth  -> sc.yellow
               Amp.Vocal  -> sc.green
               Amp.Guitar -> sc.orange
+            _ -> case color of
+              ManiaRed   -> sc.red
+              ManiaWhite -> sc.blue
+              ManiaBlack -> sc.purple
           (x1, x2) = let
             (leftBound, rightBound) = keyBounds key
             center = (leftBound + rightBound) / 2
@@ -1369,17 +1369,17 @@ drawMania glStuff@GLStuff{..} nowTime speed pmania trk = do
         z = timeToZ t
         (z1, z2) = (z - halfWidth, z + halfWidth)
         stretch = ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)
-        texid = case pmania.instrument of
-          Nothing -> case color of
-            ManiaRed   -> TextureRedGem
-            ManiaWhite -> TextureBlueGem
-            ManiaBlack -> TexturePurpleGem
-          Just inst -> case inst of
+        texid = case mchart.style of
+          ManiaAmplitude inst -> case inst of
             Amp.Drums  -> TextureRedGem
             Amp.Bass   -> TextureBlueGem
             Amp.Synth  -> TextureYellowGem
             Amp.Vocal  -> TextureGreenGem
             Amp.Guitar -> TextureOrangeGem
+          _ -> case color of
+            ManiaRed   -> TextureRedGem
+            ManiaWhite -> TextureBlueGem
+            ManiaBlack -> TexturePurpleGem
         shade = case alpha of
           Nothing -> CSImage texid
           Just _  -> CSColor gfxConfig.objects.gems.color_hit
@@ -1468,17 +1468,17 @@ drawMania glStuff@GLStuff{..} nowTime speed pmania trk = do
   void $ Map.traverseWithKey drawBeat zoomed
   -- draw target
   forM_ (zip [0..] keys) $ \(i, color) -> let
-    tex = case pmania.instrument of
-      Nothing -> case color of
-        ManiaRed   -> TextureTargetRed
-        ManiaWhite -> TextureTargetBlue
-        ManiaBlack -> TextureTargetPurple
-      Just inst -> case inst of
+    tex = case mchart.style of
+      ManiaAmplitude inst -> case inst of
         Amp.Drums  -> TextureTargetRed
         Amp.Bass   -> TextureTargetBlue
         Amp.Synth  -> TextureTargetYellow
         Amp.Vocal  -> TextureTargetGreen
         Amp.Guitar -> TextureTargetOrange
+      _ -> case color of
+        ManiaRed   -> TextureTargetRed
+        ManiaWhite -> TextureTargetBlue
+        ManiaBlack -> TextureTargetPurple
     in drawTargetSquare i tex 1
   let drawLights [] _ = return ()
       drawLights _ [] = return ()
@@ -1491,17 +1491,17 @@ drawMania glStuff@GLStuff{..} nowTime speed pmania trk = do
               guard $ isJust (getNow pnf) || isJust (getPast pnf)
               Just alpha
         (colorsYes, colorsNo) = flip partitionMaybe colors $ \(i, color) -> let
-          light = case pmania.instrument of
-            Nothing -> case color of
-              ManiaRed   -> TextureTargetRedLight
-              ManiaWhite -> TextureTargetBlueLight
-              ManiaBlack -> TextureTargetPurpleLight
-            Just inst -> case inst of
+          light = case mchart.style of
+            ManiaAmplitude inst -> case inst of
               Amp.Drums  -> TextureTargetRedLight
               Amp.Bass   -> TextureTargetBlueLight
               Amp.Synth  -> TextureTargetYellowLight
               Amp.Vocal  -> TextureTargetGreenLight
               Amp.Guitar -> TextureTargetOrangeLight
+            _ -> case color of
+              ManiaRed   -> TextureTargetRedLight
+              ManiaWhite -> TextureTargetBlueLight
+              ManiaBlack -> TextureTargetPurpleLight
           in fmap (\thisAlpha -> (i, light, thisAlpha)) $ getLightAlpha i
         alpha = 1 - realToFrac (nowTime - t) / gfxConfig.track.targets.secs_light
         in do

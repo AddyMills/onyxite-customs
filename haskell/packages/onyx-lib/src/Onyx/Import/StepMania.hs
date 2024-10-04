@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE PatternSynonyms       #-}
 {-# OPTIONS_GHC -fno-warn-ambiguous-fields #-}
@@ -275,12 +276,18 @@ importSM src level = do
         (Nothing, Just jp) -> (Just jp, Nothing)
         pair               -> pair
 
-  let diffNameList
-        = map smn_Difficulty
-        $ sortOn smn_NumericalMeter
-        $ filter importableSMN
-        $ sm_NOTES sm
-  diffNames <- maybe (fatal "No .sm importable difficulties found") return $ NE.nonEmpty diffNameList
+  diffs <- maybe (fatal "No .sm importable difficulties found") return $ NE.nonEmpty $ do
+    smn <- sortOn smn_NumericalMeter $ filter importableSMN $ sm_NOTES sm
+    let keyCount = case concat smn.smn_Notes of
+          line : _ -> T.length line
+          []       -> 1
+    return ManiaChart
+      { name = smn.smn_Difficulty
+      , keys = keyCount
+      , style = if keyCount == 4 then ManiaArrows else ManiaDefault
+      -- hack difficulty rating so e.g. 10 becomes 6
+      , difficulty = Tier $ fromIntegral $ max 1 $ smn.smn_NumericalMeter - 4
+      }
 
   return SongYaml
     { metadata = def'
@@ -314,24 +321,7 @@ importSM src level = do
       }
     , targets = HM.empty
     , parts = Parts $ HM.singleton (F.PartName "dance") (emptyPart :: Part SoftFile)
-      { mania = Just ModeMania
-        { difficulty = Tier $ max 1 $ let
-          -- as a hack, get max meter value and subtract 4 (so 10 becomes 6)
-          meters
-            = map smn_NumericalMeter
-            $ filter importableSMN
-            $ sm_NOTES sm
-          in fromIntegral $ foldr max 0 meters - 4
-        -- TODO I guess we ought to have each chart able to have its own keys count
-        , keys = foldr max 1 $ do
-          smn <- sm_NOTES sm
-          case concat $ smn_Notes smn of
-            line : _ -> [T.length line]
-            []       -> []
-        , turntable = False
-        , instrument = Nothing
-        , charts = diffNames
-        }
+      { mania = Just $ ModeMania diffs
       }
     , global = Global
       { fileMidi = SoftFile "notes.mid" $ SoftChart mid

@@ -248,11 +248,11 @@ batchPageGH3 sink rect tab build = do
             , F.PartName "dance"
             ]
           coopPart = find (\(p, _) -> hasPart p && leadPart /= Just p)
-            [ (F.PartGuitar        , GH2Rhythm)
+            [ (F.PartGuitar       , GH2Rhythm)
             , (F.PartName "rhythm", GH2Rhythm)
-            , (F.PartBass          , GH2Bass  )
-            , (F.PartKeys          , GH2Rhythm)
-            , (F.PartDrums         , GH2Rhythm)
+            , (F.PartBass         , GH2Bass  )
+            , (F.PartKeys         , GH2Rhythm)
+            , (F.PartDrums        , GH2Rhythm)
             , (F.PartName "dance" , GH2Rhythm)
             ]
           tgt = (def :: TargetGH3 FilePath)
@@ -328,11 +328,11 @@ batchPageGH2 sink rect tab build = do
             , F.PartName "dance"
             ]
           coopPart = find (\(p, _) -> hasPart p && leadPart /= Just p)
-            [ (F.PartGuitar        , GH2Rhythm)
+            [ (F.PartGuitar       , GH2Rhythm)
             , (F.PartName "rhythm", GH2Rhythm)
-            , (F.PartBass          , GH2Bass  )
-            , (F.PartKeys          , GH2Rhythm)
-            , (F.PartDrums         , GH2Rhythm)
+            , (F.PartBass         , GH2Bass  )
+            , (F.PartKeys         , GH2Rhythm)
+            , (F.PartDrums        , GH2Rhythm)
             , (F.PartName "dance" , GH2Rhythm)
             ]
           tgt = defGH2

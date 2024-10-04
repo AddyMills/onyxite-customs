@@ -307,11 +307,11 @@ importRSSong folder song level = do
             then ((slot, n2), sng, bnkPath, meta, isBass, tones)
             else orig
         in if
-          | elem F.PartGuitar originalNames                 -> input
+          | elem F.PartGuitar originalNames                -> input
           | elem (F.PartName "combo-lead"  ) originalNames -> replaceName (F.PartName "combo-lead"  ) F.PartGuitar
           | elem (F.PartName "combo-rhythm") originalNames -> replaceName (F.PartName "combo-rhythm") F.PartGuitar
           | elem (F.PartName "rhythm"      ) originalNames -> replaceName (F.PartName "rhythm"      ) F.PartGuitar
-          | otherwise                                       -> input
+          | otherwise                                      -> input
       toSeconds = realToFrac :: Float -> U.Seconds
       midi = case level of
         ImportFull -> F.Song temps sigs mempty

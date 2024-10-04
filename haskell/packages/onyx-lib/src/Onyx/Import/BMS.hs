@@ -251,7 +251,7 @@ importBMS bmsPath level = do
     , plans = HM.singleton "bms" $ StandardPlan StandardPlanInfo
       { song        = guard (isJust songSampleTrack) >> Just (audioExpr "audio-bgm")
       , parts       = Parts $ HM.fromList $ catMaybes
-        [ guard (isJust p1SampleTrack) >> Just (F.PartKeys          , PartSingle $ audioExpr "audio-p1")
+        [ guard (isJust p1SampleTrack) >> Just (F.PartKeys         , PartSingle $ audioExpr "audio-p1")
         , guard (isJust p2SampleTrack) >> Just (F.PartName "rhythm", PartSingle $ audioExpr "audio-p2")
         ]
       , crowd       = Nothing
@@ -262,27 +262,28 @@ importBMS bmsPath level = do
     , targets = HM.empty
     , parts = Parts $ HM.fromList $ do
       (fpart, indexed, p1) <-
-        [ (F.PartKeys          , player1Indexed, True )
+        [ (F.PartKeys         , player1Indexed, True )
         , (F.PartName "rhythm", player2Indexed, False)
         ]
       guard $ not $ RTB.null indexed
       return (fpart, emptyPart
-        { mania = Just ModeMania
-          { keys      = if p1
+        { mania = Just $ ModeMania $ return ManiaChart
+          { name = "chart"
+          , keys = if p1
             then if shouldCombine
               then Set.size usedKeys1 + Set.size usedKeys2
               else Set.size usedKeys1
             else if shouldCombine
               then 0 -- shouldn't happen
               else Set.size usedKeys2
-          , turntable = if p1
-            then Set.member BMScratch usedKeys1
-            else if shouldCombine
-              then False -- shouldn't happen
-              else Set.member BMScratch usedKeys2
+          , style = let
+            turntable = if p1
+              then Set.member BMScratch usedKeys1
+              else if shouldCombine
+                then False -- shouldn't happen
+                else Set.member BMScratch usedKeys2
+            in if turntable then ManiaTurntable else ManiaDefault
           , difficulty = Tier 1 -- ?
-          , instrument = Nothing
-          , charts = pure "chart"
           }
         })
     }

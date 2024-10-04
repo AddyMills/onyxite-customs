@@ -703,13 +703,14 @@ importFoF src dir level = do
                 guard $ not $ RTB.null maniaTrack.maniaNotes
                 return name
           maniaDiffs <- NE.nonEmpty maniaDiffList
-          Just ModeMania
-            { difficulty = toTier song.diffDance
-            , keys = 4 -- could be lower? hopefully not higher
-            , turntable = False
-            , instrument = Nothing
-            , charts = maniaDiffs
-            }
+          Just $ ModeMania $ do
+            diff <- maniaDiffs
+            return ManiaChart
+              { name = diff
+              , keys = 4 -- could be lower? hopefully not higher
+              , style = ManiaArrows
+              , difficulty = toTier song.diffDance
+              }
         })
       ]
     }

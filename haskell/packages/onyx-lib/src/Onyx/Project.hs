@@ -819,30 +819,50 @@ instance (Eq f, StackJSON f) => StackJSON (ModeVocal f) where
     lipsyncRB3 <- (.lipsyncRB3) =. opt  Nothing  "lipsync-rb3" stackJSON
     return ModeVocal{..}
 
-instance StackJSON Amp.Instrument where
-  stackJSON = enumCodec "amplitude instrument type" $ \case
-    Amp.Drums  -> "drums"
-    Amp.Bass   -> "bass"
-    Amp.Synth  -> "synth"
-    Amp.Vocal  -> "vocal"
-    Amp.Guitar -> "guitar"
-
-data ModeMania = ModeMania
-  { keys       :: Int
-  , turntable  :: Bool
-  , difficulty :: Difficulty
-  , instrument :: Maybe Amp.Instrument
-  , charts     :: NE.NonEmpty T.Text -- TODO put difficulties here maybe
+newtype ModeMania = ModeMania
+  { charts :: NE.NonEmpty ManiaChart -- sorted easy to hard
   } deriving (Eq, Ord, Show)
 
 instance StackJSON ModeMania where
   stackJSON = asStrictObject "ModeMania" $ do
-    keys       <- (.keys)       =. req           "keys"       stackJSON
-    turntable  <- (.turntable)  =. opt  False    "turntable"  stackJSON
-    difficulty <- (.difficulty) =. fill (Tier 1) "difficulty" stackJSON
-    instrument <- (.instrument) =. opt  Nothing  "instrument" stackJSON
     charts     <- (.charts)     =. req           "charts"     stackJSON
     return ModeMania{..}
+
+data ManiaChart = ManiaChart
+  { name       :: T.Text
+  , keys       :: Int
+  , style      :: ManiaStyle
+  , difficulty :: Difficulty
+  } deriving (Eq, Ord, Show)
+
+instance StackJSON ManiaChart where
+  stackJSON = asStrictObject "ManiaChart" $ do
+    name       <- (.name)       =. req              "name"       stackJSON
+    keys       <- (.keys)       =. req              "keys"       stackJSON
+    style      <- (.style)      =. opt ManiaDefault "style"      stackJSON
+    difficulty <- (.difficulty) =. fill (Tier 1)    "difficulty" stackJSON
+    return ManiaChart{..}
+
+data ManiaStyle
+  = ManiaDefault
+  | ManiaArrows
+  | ManiaTurntable
+  | ManiaAmplitude Amp.Instrument
+  | ManiaFestival
+  deriving (Eq, Ord, Show, Generic)
+  deriving (Enum, Bounded) via GenericFullEnum ManiaStyle
+
+instance StackJSON ManiaStyle where
+  stackJSON = enumCodecFull "mania chart style" $ \case
+    ManiaDefault              -> is A.Null |?> is "default"
+    ManiaArrows               -> is "arrows"
+    ManiaTurntable            -> is "turntable"
+    ManiaAmplitude Amp.Drums  -> is "amp-drums"
+    ManiaAmplitude Amp.Bass   -> is "amp-bass"
+    ManiaAmplitude Amp.Synth  -> is "amp-synth"
+    ManiaAmplitude Amp.Vocal  -> is "amp-vocal"
+    ManiaAmplitude Amp.Guitar -> is "amp-guitar"
+    ManiaFestival             -> is "festival"
 
 data Part f = Part
   { grybo     :: Maybe ModeFive
@@ -1279,16 +1299,16 @@ data TargetPS f = TargetPS
 parseTargetPS :: (SendMessage m, Eq f, StackJSON f) => ObjectCodec m A.Value (TargetPS f)
 parseTargetPS = do
   common        <- (.common       ) =. parseTargetCommon
-  guitar        <- (.guitar       ) =. opt F.PartGuitar                "guitar"          stackJSON
-  bass          <- (.bass         ) =. opt F.PartBass                  "bass"            stackJSON
-  drums         <- (.drums        ) =. opt F.PartDrums                 "drums"           stackJSON
-  keys          <- (.keys         ) =. opt F.PartKeys                  "keys"            stackJSON
-  vocal         <- (.vocal        ) =. opt F.PartVocal                 "vocal"           stackJSON
+  guitar        <- (.guitar       ) =. opt F.PartGuitar               "guitar"          stackJSON
+  bass          <- (.bass         ) =. opt F.PartBass                 "bass"            stackJSON
+  drums         <- (.drums        ) =. opt F.PartDrums                "drums"           stackJSON
+  keys          <- (.keys         ) =. opt F.PartKeys                 "keys"            stackJSON
+  vocal         <- (.vocal        ) =. opt F.PartVocal                "vocal"           stackJSON
   rhythm        <- (.rhythm       ) =. opt (F.PartName "rhythm"     ) "rhythm"          stackJSON
   guitarCoop    <- (.guitarCoop   ) =. opt (F.PartName "guitar-coop") "guitar-coop"     stackJSON
   dance         <- (.dance        ) =. opt (F.PartName "dance"      ) "dance"           stackJSON
-  bigRockEnding <- (.bigRockEnding) =. opt True                        "big-rock-ending" stackJSON
-  audioFormat   <- (.audioFormat  ) =. opt "ogg"                       "audio-format"    stackJSON
+  bigRockEnding <- (.bigRockEnding) =. opt True                       "big-rock-ending" stackJSON
+  audioFormat   <- (.audioFormat  ) =. opt "ogg"                      "audio-format"    stackJSON
   return TargetPS{..}
 
 instance (Eq f, StackJSON f) => StackJSON (TargetPS f) where
@@ -1355,20 +1375,20 @@ data TargetGH2 f = TargetGH2
 parseTargetGH2 :: (SendMessage m, Eq f, StackJSON f) => ObjectCodec m A.Value (TargetGH2 f)
 parseTargetGH2 = do
   common        <- (.common       ) =. parseTargetCommon
-  guitar        <- (.guitar       ) =. opt F.PartGuitar           "guitar"         stackJSON
-  bass          <- (.bass         ) =. opt F.PartBass             "bass"           stackJSON
+  guitar        <- (.guitar       ) =. opt F.PartGuitar          "guitar"         stackJSON
+  bass          <- (.bass         ) =. opt F.PartBass            "bass"           stackJSON
   rhythm        <- (.rhythm       ) =. opt (F.PartName "rhythm") "rhythm"         stackJSON
-  drums         <- (.drums        ) =. opt F.PartDrums            "drums"          stackJSON
-  keys          <- (.keys         ) =. opt F.PartKeys             "keys"           stackJSON
-  vocal         <- (.vocal        ) =. opt F.PartVocal            "vocal"          stackJSON
-  coop          <- (.coop         ) =. opt GH2Bass              "coop"           stackJSON
-  key           <- (.key          ) =. opt Nothing              "key"            stackJSON
-  context       <- (.context      ) =. opt Nothing              "context"        stackJSON
-  leaderboard   <- (.leaderboard  ) =. opt Nothing              "leaderboard"    stackJSON
-  practiceAudio <- (.practiceAudio) =. opt True                 "practice-audio" stackJSON
-  offset        <- (.offset       ) =. opt 0                    "offset"         stackJSON
-  gh2Deluxe     <- (.gh2Deluxe    ) =. opt False                "gh2-deluxe"     stackJSON
-  is2xBassPedal <- (.is2xBassPedal) =. opt False                "2x-bass-pedal"  stackJSON
+  drums         <- (.drums        ) =. opt F.PartDrums           "drums"          stackJSON
+  keys          <- (.keys         ) =. opt F.PartKeys            "keys"           stackJSON
+  vocal         <- (.vocal        ) =. opt F.PartVocal           "vocal"          stackJSON
+  coop          <- (.coop         ) =. opt GH2Bass               "coop"           stackJSON
+  key           <- (.key          ) =. opt Nothing               "key"            stackJSON
+  context       <- (.context      ) =. opt Nothing               "context"        stackJSON
+  leaderboard   <- (.leaderboard  ) =. opt Nothing               "leaderboard"    stackJSON
+  practiceAudio <- (.practiceAudio) =. opt True                  "practice-audio" stackJSON
+  offset        <- (.offset       ) =. opt 0                     "offset"         stackJSON
+  gh2Deluxe     <- (.gh2Deluxe    ) =. opt False                 "gh2-deluxe"     stackJSON
+  is2xBassPedal <- (.is2xBassPedal) =. opt False                 "2x-bass-pedal"  stackJSON
   return TargetGH2{..}
 
 instance (Eq f, StackJSON f) => StackJSON (TargetGH2 f) where

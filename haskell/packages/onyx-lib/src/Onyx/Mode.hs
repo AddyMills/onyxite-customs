@@ -347,17 +347,18 @@ nativeProKeys part = flip fmap part.proKeys $ \ppk input -> let
     }
 
 getManiaNormalTopDifficulty :: (NNC.C t) => ModeMania -> F.OnyxPart t -> RTB.T t (RB.Edge () Int)
-getManiaNormalTopDifficulty pm part = case Map.lookup (NE.last pm.charts) part.onyxPartMania of
+getManiaNormalTopDifficulty pm part = case Map.lookup (NE.last pm.charts).name part.onyxPartMania of
   Nothing  -> RTB.empty
   Just trk -> getManiaNormalNotes trk
 
 maniaToProKeys :: Part f -> Maybe BuildProKeys
 maniaToProKeys part = do
   pm <- part.mania
-  guard $ pm.keys > 5 -- don't make pro keys if this chart fits in basic keys
-  guard $ pm.keys <= 10 -- for now, only use white keys and don't try to autochart down
+  let keyCount = maximum $ fmap (.keys) pm.charts
+  guard $ keyCount > 5 -- don't make pro keys if this chart fits in basic keys
+  guard $ keyCount <= 10 -- for now, only use white keys and don't try to autochart down
   Just $ \input -> let
-    (range, keys) = case pm.keys of
+    (range, keys) = case keyCount of
       1 -> (RangeF, [                                                    BlueGreen D                                                    ])
       3 -> (RangeF, [                                       BlueGreen C, BlueGreen D, BlueGreen E                                       ])
       5 -> (RangeF, [                          RedYellow B, BlueGreen C, BlueGreen D, BlueGreen E, BlueGreen F                          ])
@@ -604,9 +605,10 @@ maniaChordSnap = U.trackJoin . RTB.flatten . go . RTB.collectCoincident where
 
 maniaToFiveFret :: Part f -> Maybe BuildFive
 maniaToFiveFret part = flip fmap part.mania $ \pm _ftype input -> let
+  keyCount = maximum $ fmap (.keys) pm.charts
   in FiveResult
     { settings = def :: ModeFive
-    , notes = Map.singleton Expert $ if pm.keys <= 5
+    , notes = Map.singleton Expert $ if keyCount <= 5
       then fmap (\(k, len) -> ((Just $ toEnum k, Tap), len))
         $ RB.edgeBlips_ RB.minSustainLengthRB
         $ maniaChordSnap
@@ -638,11 +640,12 @@ maniaToFiveFret part = flip fmap part.mania $ \pm _ftype input -> let
           $ chorded
     , other = mempty
     , source = "converted Mania chart to five-fret"
-    , autochart = pm.keys > 5
+    , autochart = keyCount > 5
     }
 
 maniaToDrums :: Part f -> Maybe BuildDrums
 maniaToDrums part = flip fmap part.mania $ \pm dtarget input -> let
+  keyCount = maximum $ fmap (.keys) pm.charts
   inputNotes :: RTB.T U.Beats Int
   inputNotes
     = RTB.flatten
@@ -656,7 +659,7 @@ maniaToDrums part = flip fmap part.mania $ \pm dtarget input -> let
     $ maniaChordSnap
     $ getManiaNormalTopDifficulty pm input.part
   notes :: RTB.T U.Beats (D.Gem D.ProType)
-  notes = if pm.keys <= laneCount
+  notes = if keyCount <= laneCount
     then keyToDrum <$> inputNotes
     else RTB.fromAbsoluteEventList $ ATB.fromPairList
       $ map (\(t, n) -> (realToFrac t, keyToDrum n))
@@ -684,7 +687,7 @@ maniaToDrums part = flip fmap part.mania $ \pm dtarget input -> let
       $ U.applyTempoTrack input.tempo notes
       :: RTB.T U.Beats D.Animation
     , source = "converted Mania chart to drums"
-    , autochart = pm.keys > laneCount
+    , autochart = keyCount > laneCount
     , eliteDrums = Nothing
     }
 

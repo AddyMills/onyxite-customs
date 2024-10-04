@@ -828,12 +828,12 @@ processMIDI target songYaml origInput mixMode getAudioLength = inside "Processin
           fpart = ps.dance
           in case getPart fpart songYaml >>= (.mania) of
             Nothing -> mempty
-            Just pm -> if pm.keys <= 4
+            Just pm -> if maximum (fmap (.keys) pm.charts) <= 4
               then let
                 -- TODO if the difficulties are named right, map them as is
                 diffMapping = zip
                   (reverse [minBound .. maxBound])
-                  (reverse $ toList pm.charts)
+                  (reverse $ map (.name) $ toList pm.charts)
                 in maniaToDance diffMapping (F.getFlexPart fpart trks).onyxPartMania
               else mempty -- TODO autochart down!
   return (F.Song tempos' mmap' F.FixedFile

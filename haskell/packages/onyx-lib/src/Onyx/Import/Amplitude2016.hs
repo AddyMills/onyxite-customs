@@ -143,11 +143,13 @@ importAmplitudeSong songFolder moggSongName level = do
     , targets = HM.empty
     , parts = Parts $ HM.fromList $ do
       (name, _, inst, _) <- parts
-      return (name, emptyPart { mania = Just ModeMania
-        { keys = 3
-        , turntable = False
-        , difficulty = Tier 1 -- ?
-        , instrument = Just inst
-        , charts = fmap amplitudeDiffNames $ Easy NE.:| [Medium, Hard, Expert]
-        }})
+      return (name, emptyPart { mania = Just $ ModeMania $ do
+        diff <- fmap amplitudeDiffNames $ Easy NE.:| [Medium, Hard, Expert]
+        return ManiaChart
+          { name = diff
+          , keys = 3
+          , style = ManiaAmplitude inst
+          , difficulty = Tier 1 -- ?
+          }
+        })
     }

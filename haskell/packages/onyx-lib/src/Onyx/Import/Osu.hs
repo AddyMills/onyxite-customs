@@ -242,12 +242,11 @@ importOsu separateSongs f = do
             { drums = Just $ emptyPartDrums Drums4 Kicks1x
             })
           Right _mania -> return $ (partName, emptyPart
-            { mania = Just ModeMania
-              { keys = fromIntegral $ maniaColumnCount osu
-              , turntable = osu.general.specialStyle
+            { mania = Just $ ModeMania $ return ManiaChart
+              { name = "chart"
+              , keys = fromIntegral $ maniaColumnCount osu
+              , style = if osu.general.specialStyle then ManiaTurntable else ManiaDefault
               , difficulty = Tier 1 -- ?
-              , instrument = Nothing
-              , charts = pure "chart"
               }
             })
       }

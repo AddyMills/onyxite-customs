@@ -61,7 +61,7 @@ data PreviewTrack
   | PreviewDrumsElite [EliteDrumLayoutHint] (Map.Map Double (PNF.CommonState (PNF.EliteDrumState Double (ED.EliteDrumNote ED.FlamStatus) (ED.EliteGem ()))))
   | PreviewFive (Map.Map Double (PNF.CommonState (PNF.GuitarState Double (Maybe Five.Color))))
   | PreviewPG PG.GtrTuning (Map.Map Double (PNF.CommonState (PNF.PGState Double)))
-  | PreviewMania ModeMania (Map.Map Double (PNF.CommonState PNF.ManiaState))
+  | PreviewMania ManiaChart (Map.Map Double (PNF.CommonState PNF.ManiaState))
   deriving (Show)
 
 data PreviewBG
@@ -135,10 +135,10 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
 
   maniaTracks pm fpart = do
     part <- toList $ Map.lookup fpart song.tracks.onyxParts
-    diffName <- reverse $ toList pm.charts -- list difficulties in reverse order (hardest first)
-    mania <- toList $ Map.lookup diffName part.onyxPartMania
+    chart <- reverse $ toList pm.charts -- list difficulties in reverse order (hardest first)
+    mania <- toList $ Map.lookup chart.name part.onyxPartMania
     trk <- toList $ maniaTrack mania
-    return (diffName, trk)
+    return (chart, trk)
 
   maniaTrack src = let
     assigned :: RTB.T U.Beats (LongNote () Int)
@@ -445,11 +445,11 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
       [ do
         guard $ not $ RTB.null $ rsNotes srcG
         let name = case fpart of
-              F.PartGuitar               -> "RS Lead"
+              F.PartGuitar              -> "RS Lead"
               F.PartName "rhythm"       -> "RS Rhythm"
               F.PartName "bonus-lead"   -> "RS Bonus Lead"
               F.PartName "bonus-rhythm" -> "RS Bonus Rhythm"
-              _                          -> displayPartName fpart <> " [RS Guitar]"
+              _                         -> displayPartName fpart <> " [RS Guitar]"
         return $ (\rso -> (name, PreviewPG ppg.tuning $ pgRocksmith rso)) <$> buildRS tempos 0 srcG
       , do
         guard $ not $ RTB.null $ rsNotes srcB
@@ -591,9 +591,9 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
     mania = case part.mania of
       Nothing -> []
       Just pm -> do
-        (maniaName, trk) <- maniaTracks pm fpart
-        let name = displayPartName fpart <> " [Mania: " <> maniaName <> "]"
-        return (name, PreviewMania pm trk)
+        (chart, trk) <- maniaTracks pm fpart
+        let name = displayPartName fpart <> " [Mania: " <> chart.name <> "]"
+        return (name, PreviewMania chart trk)
     pg = case part.proGuitar of
       Nothing     -> []
       Just ppg -> let
