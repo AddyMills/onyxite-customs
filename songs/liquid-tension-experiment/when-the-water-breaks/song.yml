@@ -59,12 +59,12 @@ parts:
 targets:
   rb3:
     game: rb3
-    song-id: 1660200031
+    song-id: 1660200174
     plan: album
   rb3-2x:
     game: rb3
     2x-bass-pedal: true
-    song-id: 1660200032
+    song-id: 1660200175
     plan: album
   ps:
     game: ps

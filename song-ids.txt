@@ -257,6 +257,10 @@ onyxite's C3-format Song IDs (16602xxxxx)
   earlier released just drums (no numeric ID)
   v1 released 2020-12-24 for C3 12DOC
 
+1660200174 When the Water Breaks (Liquid Tension Experiment) 1x
+1660200175 When the Water Breaks (Liquid Tension Experiment) 2x
+  v3 published 2024-10-11
+
 BONUS SONGS (counting down from max)
 
 1660299999 hacked c3 6:00 drum chart

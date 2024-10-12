@@ -1,0 +1,59 @@
+metadata:
+  track-number: 2
+  album: Parasomnia
+  year: 2025
+  author: Onyxite
+  title: Night Terror
+  genre: metal
+  subgenre: prog
+  artist: Dream Theater
+  file-album-art: cover.jpg
+plans:
+  album:
+    song:
+      mix:
+      - countin
+      - pad: [5.002, youtube]
+  dev:
+    song:
+      pad: [5.002, youtube]
+    parts:
+      bass:
+        pad: [5.002, channels: [[0, 1], stems]]
+      drums:
+        pad: [5.002, channels: [[2, 3], stems]]
+      vocal:
+        pad: [5.002, channels: [[4, 5], stems]]
+      other:
+        pad: [5.002, channels: [[6, 7], stems]]
+audio:
+  youtube:
+    file-path: audio-youtube.wav
+    commands:
+    - ../../../scripts/youtube ZxEk4csgD4g 140
+  hihat:
+    file-path: ../../../sound/hihat-foot.wav
+  countin:
+    samples: {}
+  stems:
+    file-path: audio-stems.wav
+    commands:
+    - ../../../scripts/stems AUDIO(youtube) audio-stems.wav
+    channels: 8
+parts:
+  drums:
+    drums:
+      kicks: both
+      mode: elite
+      difficulty: 6
+targets:
+  rb3:
+    game: rb3
+    plan: album
+  rb3-2x:
+    game: rb3
+    2x-bass-pedal: true
+    plan: album
+  ps:
+    game: ps
+    plan: album
