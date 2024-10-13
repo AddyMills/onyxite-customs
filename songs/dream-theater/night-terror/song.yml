@@ -46,6 +46,10 @@ parts:
       kicks: both
       mode: elite
       difficulty: 6
+  bass:
+    pro-guitar:
+      tuning:
+        base: bass-5 # not sure he didn't use C string but charted ok without it
 targets:
   rb3:
     game: rb3
