@@ -848,7 +848,7 @@ data ManiaStyle
   | ManiaArrows
   | ManiaTurntable
   | ManiaAmplitude Amp.Instrument
-  | ManiaFestival
+  | ManiaEncore
   deriving (Eq, Ord, Show, Generic)
   deriving (Enum, Bounded) via GenericFullEnum ManiaStyle
 
@@ -862,7 +862,7 @@ instance StackJSON ManiaStyle where
     ManiaAmplitude Amp.Synth  -> is "amp-synth"
     ManiaAmplitude Amp.Vocal  -> is "amp-vocal"
     ManiaAmplitude Amp.Guitar -> is "amp-guitar"
-    ManiaFestival             -> is "festival"
+    ManiaEncore               -> is "encore"
 
 data Part f = Part
   { grybo     :: Maybe ModeFive

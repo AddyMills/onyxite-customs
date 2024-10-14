@@ -19,6 +19,7 @@ import           Control.Monad.Trans.Resource (MonadResource, liftResourceT,
 import           Data.Coerce                  (coerce)
 import           Data.Conduit
 import qualified Data.Conduit.Audio           as CA
+import           Data.List.Split                  (splitOn)
 import           Data.Maybe                   (catMaybes)
 import           Onyx.Util.Handle            (Readable, rOpen)
 import           Data.Typeable                (Typeable)
@@ -370,7 +371,9 @@ pix_fmt = fmap (toEnum . fromIntegral) . {#get AVCodecContext->pix_fmt #}
 #}
 
 frame_data :: AVFrame -> IO (Ptr (Ptr CUChar))
-frame_data = {#get AVFrame->data #}
+frame_data = {#get AVFrame->extended_data #}
+-- extended_data is required for audio with more than AV_NUM_DATA_POINTERS (8) channels
+-- but we should always be able to use it in place of AVFrame->data
 
 frame_linesize :: AVFrame -> IO (Ptr CInt)
 frame_linesize = {#get AVFrame->linesize #}
@@ -842,8 +845,16 @@ ffSourceFrom dur input = do
     -- but with 6.1 everything seems fine?
     rate <- {#get AVCodecContext->sample_rate #} dec_ctx
     channels <- {#get AVCodecContext->channels #} dec_ctx
-    framesOrig <- {#get AVStream->nb_frames #} stream >>= \case
-      0 -> do
+    -- trying to handle festival's m4a-opus files right, they have weird low nb_frames
+    isM4A <- {#get AVFormatContext->iformat #} fmt_ctx >>= \p -> if p == nullPtr
+      then return False
+      else {#get AVInputFormat->name #} p >>= \s -> if s == nullPtr
+        then return False
+        else do
+          str <- peekCString s
+          return $ elem "m4a" $ splitOn "," str
+    framesOrig <- {#get AVStream->nb_frames #} stream >>= \frames -> if frames == 0 || isM4A
+      then do
         -- nb_frames appears to be 0 in ogg and bik files? so we do this as backup.
         streamRes <- (\(num, den) -> realToFrac num / realToFrac den) <$> stream_time_base stream
         streamDur <- {#get AVStream->duration #} stream
@@ -854,7 +865,8 @@ ffSourceFrom dur input = do
           else do
             -- streamRes might be 1 / rate? but better to be sure
             return $ round ((fromIntegral streamDur * streamRes) * fromIntegral rate :: Double)
-      frames -> return frames
+      else do
+        return frames
     -- need to skip mp3 initial decoder delay, also not sure why extra length adjustment is needed
     isMP3 <- (== fromIntegral (fromEnum AV_CODEC_ID_MP3))
       <$> {#get AVCodecContext->codec_id #} dec_ctx

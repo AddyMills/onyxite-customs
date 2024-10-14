@@ -59,6 +59,7 @@ import           Onyx.Util.Files              (fixFileCase)
 import           Onyx.Zip.Load                (loadZipReadables)
 -- import           Onyx.Import.DonkeyKonga      (supportedDKGames)
 import           Onyx.Import.DTXMania         (importDTX, importSet)
+import           Onyx.Import.Encore           (importEncore)
 import           Onyx.Import.Freetar          (importFreetar)
 import           Onyx.Import.FretsOnFire      (importFoF)
 import qualified Onyx.Import.GuitarHero1      as GH1
@@ -171,6 +172,9 @@ findSongs fp' = inside ("searching: " <> fp') $ fmap (fromMaybe ([], [])) $ erro
         let dir = takeDirectory loc
         folder <- stackIO $ crawlFolder dir
         foundImport "Frets on Fire/Phase Shift/Clone Hero" dir $ importFoF dir folder
+      foundEncore infoJSON = do
+        let dir = takeDirectory infoJSON
+        foundImport "Encore" dir $ importEncore dir
       foundHDR hdr = do
         let dir = takeDirectory hdr
         stackIO (crawlFolder dir) >>= foundGEN dir
@@ -422,6 +426,8 @@ findSongs fp' = inside ("searching: " <> fp') $ fmap (fromMaybe ([], [])) $ erro
       lookFor
         -- Don't look in the Onyx gen folder and probably find built artifacts
         [ ("song.yml", foundYaml)
+        -- Handle Encore format before song.ini
+        , ("info.json", foundEncore)
         -- Make sure we don't pick up song.ini and notes.chart separately
         , ("song.ini", foundFoF)
         , ("notes.chart", foundFoF)
@@ -481,6 +487,7 @@ findSongs fp' = inside ("searching: " <> fp') $ fmap (fromMaybe ([], [])) $ erro
         _ -> case map toLower $ takeFileName fp of
           "song.yml" -> foundYaml fp
           "song.ini" -> foundFoF fp
+          "info.json" -> foundEncore fp
           "info.dat" -> foundRagnarock fp
           "set.def" -> foundDTXSet fp
           "main.hdr" -> foundHDR fp

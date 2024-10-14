@@ -7,8 +7,6 @@ module Onyx.Import.Paradiddle (importParadiddle, findParadiddle) where
 
 import           Control.Monad                    (forM, guard)
 import           Control.Monad.IO.Class           (MonadIO)
-import           Control.Monad.Trans.Reader       (runReaderT)
-import qualified Data.ByteString                  as B
 import qualified Data.EventList.Absolute.TimeBody as ATB
 import qualified Data.EventList.Relative.TimeBody as RTB
 import           Data.Foldable                    (toList)
@@ -31,7 +29,6 @@ import           Onyx.Paradiddle
 import           Onyx.Project                     hiding (Difficulty (..))
 import           Onyx.StackTrace
 import           Onyx.Util.Handle                 (fileReadable)
-import           Onyx.Util.Text.Decode            (decodeGeneral)
 import qualified Sound.MIDI.Util                  as U
 import           System.FilePath                  (takeDirectory, takeExtension,
                                                    (<.>), (</>))
@@ -93,10 +90,7 @@ importParadiddle :: (SendMessage m, MonadIO m) => NE.NonEmpty (Difficulty, FileP
 importParadiddle diffs level = do
   let (diff, path) = NE.head diffs
       dir = takeDirectory path
-      loadJSON f = do
-        -- usually should be utf-8, but utf-16 (with BOM) has been spotted
-        json <- stackIO (B.readFile f) >>= decodeJSONText . decodeGeneral
-        mapStackTraceT (`runReaderT` json) fromJSON
+  -- json should usually be utf-8, but utf-16 (with BOM) has been spotted
   rlrr <- loadJSON path
   let tmap = paraTempoMap         rlrr
       true = paraToTrue tmap diff rlrr

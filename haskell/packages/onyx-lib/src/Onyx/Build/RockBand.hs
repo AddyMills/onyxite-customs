@@ -163,14 +163,15 @@ rbRules buildInfo dir rb3 mrb2 = do
           , uneditedDiffs.rb3VocalRank  == 0 || instrumentHasChannels rb3.vocal
           , uneditedDiffs.rb3KeysRank   == 0 || instrumentHasChannels rb3.keys
           ]
-        isBink = case info.fileMOGG of
-          Just path | takeExtension path == ".bik" -> True
-          _                                        -> False
+        isRealMOGG = case info.fileMOGG of
+          Just path | takeExtension path == ".mogg" -> True
+          Nothing                                   -> True
+          _                                         -> False
         in if allInstrumentsHaveChannels
           && maybe True (== 1) rb3.common.speed
           && isNothing rb3.common.start
           && isNothing rb3.common.end
-          && not isBink
+          && isRealMOGG
           then pair
           else (planName, StandardPlan $ moggToStandardPlan planName info)
       StandardPlan _ -> pair

@@ -609,8 +609,8 @@ shakeBuild audioDirs yamlPathRel extraTargets buildables = do
         dir </> "everything.wav" %> \out -> case plan of
           MoggPlan x -> do
             src <- shk $ buildSource $ Input $ case x.fileMOGG of
-              Just path | takeExtension path == ".bik" -> rel path
-              _                                        -> dir </> "audio.ogg"
+              Just path | takeExtension path /= ".mogg" -> rel path
+              _                                         -> dir </> "audio.ogg"
             let volsNoCrowd = zipWith noCrowd [0..] x.vols
                 noCrowd i vol = if elem i x.crowd then -99 else vol
             runAudio (applyPansVols (map realToFrac x.pans) (map realToFrac volsNoCrowd) src) out
@@ -690,13 +690,13 @@ shakeBuild audioDirs yamlPathRel extraTargets buildables = do
                     buildAudio (Silence (length x.pans) $ Frames 0) out
                 else moggToOggFiles mogg out
             wav %> case x.fileMOGG of
-              Just path | takeExtension path == ".bik" -> buildAudio (Input $ rel path)
-              _ -> buildAudio (Input ogg)
+              Just path | takeExtension path /= ".mogg" -> buildAudio (Input $ rel path)
+              _                                         -> buildAudio (Input ogg)
             let allChannelWAVs = map channelWAV [0 .. length x.pans - 1]
             allChannelWAVs %> \_ -> do
               src <- lift $ lift $ buildSource $ case x.fileMOGG of
-                Just path | takeExtension path == ".bik" -> Input $ rel path
-                _                                        -> Input ogg
+                Just path | takeExtension path /= ".mogg" -> Input $ rel path
+                _                                         -> Input ogg
               stackIO $ audioToChannelWAVs src allChannelWAVs
             mogg %> \out -> do
               p <- inside "Searching for MOGG file" $ case (x.fileMOGG, x.moggMD5) of
@@ -709,8 +709,8 @@ shakeBuild audioDirs yamlPathRel extraTargets buildables = do
               forceRW out
             dir </> "silent-channels.txt" %> \out -> do
               src <- lift $ lift $ buildSource $ case x.fileMOGG of
-                Just path | takeExtension path == ".bik" -> Input $ rel path
-                _                                        -> Input ogg
+                Just path | takeExtension path /= ".mogg" -> Input $ rel path
+                _                                         -> Input ogg
               chans <- stackIO $ runResourceT $ runConduit $ emptyChannels src
               stackIO $ writeFile out $ show chans
 

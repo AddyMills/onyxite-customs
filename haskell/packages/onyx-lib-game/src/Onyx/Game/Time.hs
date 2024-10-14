@@ -39,6 +39,7 @@ import           Onyx.MIDI.Track.Beat
 import           Onyx.MIDI.Track.Drums.Elite
 import qualified Onyx.MIDI.Track.FiveFret         as Five
 import qualified Onyx.MIDI.Track.ProGuitar        as PG
+import           Onyx.PhaseShift.Dance            (NoteType (..))
 import qualified Sound.MIDI.Util                  as U
 
 data PNF sust now
@@ -189,7 +190,7 @@ data PGState t = PGState
     deriving (TimeState) via GenericTimeState (PGState t)
 
 newtype ManiaState = ManiaState
-  { notes :: Map.Map Int (PNF () ())
+  { notes :: Map.Map Int (PNF NoteType NoteType)
   } deriving (Show, Generic)
     deriving (TimeState) via GenericTimeState ManiaState
 

@@ -60,6 +60,7 @@ import           Onyx.MIDI.Track.Drums.Elite  (EliteDrumNote (..))
 import qualified Onyx.MIDI.Track.Drums.Elite  as ED
 import qualified Onyx.MIDI.Track.FiveFret     as Five
 import qualified Onyx.MIDI.Track.ProGuitar    as PG
+import           Onyx.PhaseShift.Dance        (NoteType (..))
 import           Onyx.Preferences             (EliteDrumLayoutHint (..),
                                                Preferences (..),
                                                readPreferences)
@@ -1330,7 +1331,10 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
             gfxConfig.track.y
             (z + gfxConfig.track.beats.z_future)
           in drawObject' Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
-      keys = take mchart.keys $ [ManiaRed | mchart.style == ManiaTurntable] <> cycle [ManiaWhite, ManiaBlack]
+      keys = take mchart.keys $ case mchart.style of
+        ManiaTurntable -> ManiaRed : cycle [ManiaWhite, ManiaBlack]
+        ManiaEncore    -> [ManiaWhite, ManiaWhite] <> repeat ManiaBlack
+        _              -> cycle [ManiaWhite, ManiaBlack]
       keyColor i = case drop i keys of
         color : _ -> color
         []        -> ManiaRed -- shouldn't happen
@@ -1360,14 +1364,25 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
           y1 = y2 + gfxConfig.objects.sustains.height
           (z1, z2) = (timeToZ $ max nowTime t1, timeToZ t2)
           in drawObject' Box (ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)) (CSColor boxColor) 1 globalLight
-      drawGem t color key alpha = let
-        obj = Model ModelPGNote
+      drawGem t ntype color key alpha = let
+        obj = case ntype of
+          NoteLift -> Model ModelDrumCymbal
+          _        -> Model ModelPGNote
+          -- TODO mine
+        isLift = ntype == NoteLift
         halfWidth = keyWidth / 2
-        (x1, x2) = keyBounds key
-        y1 = gfxConfig.track.y - halfWidth
-        y2 = gfxConfig.track.y + halfWidth
+        reference = if isLift then 0.2 else halfWidth
+        (x1, x2) = let
+          pair@(orig1, orig2) = keyBounds key
+          half = (orig2 - orig1) * 0.5
+          center = orig1 + half
+          in if isLift
+            then (center - half * 0.7, center + half * 0.7)
+            else pair
+        y1 = gfxConfig.track.y - reference
+        y2 = gfxConfig.track.y + reference
         z = timeToZ t
-        (z1, z2) = (z - halfWidth, z + halfWidth)
+        (z1, z2) = (z - reference, z + reference)
         stretch = ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)
         texid = case mchart.style of
           ManiaAmplitude inst -> case inst of
@@ -1381,7 +1396,9 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
             ManiaWhite -> TextureBlueGem
             ManiaBlack -> TexturePurpleGem
         shade = case alpha of
-          Nothing -> CSImage texid
+          Nothing -> if isLift
+            then CSColor $ V4 0.8 0.8 0.8 1
+            else CSImage texid
           Just _  -> CSColor gfxConfig.objects.gems.color_hit
         in drawObject' obj stretch shade (fromMaybe 1 alpha) $ LightOffset $ let
           normalLight = gfxConfig.objects.gems.light
@@ -1390,18 +1407,18 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
       drawNotes nextTime ((thisTime, cs) : rest) = do
         let notes = Map.toList cs.inner.notes
         -- draw following sustain
-        forM_ notes $ \(key, pnf) -> forM_ (getFuture pnf) $ \() -> do
+        forM_ notes $ \(key, pnf) -> forM_ (getFuture pnf) $ \_ntype -> do
           drawSustain thisTime nextTime (keyColor key) key
         -- draw note
         let fadeTime = gfxConfig.objects.gems.secs_fade
-        forM_ notes $ \(key, pnf) -> forM_ (getNow pnf) $ \() -> if nowTime <= thisTime
-          then drawGem thisTime (keyColor key) key Nothing
+        forM_ notes $ \(key, pnf) -> forM_ (getNow pnf) $ \ntype -> if nowTime <= thisTime
+          then drawGem thisTime ntype (keyColor key) key Nothing
           else if nowTime - thisTime < realToFrac fadeTime
-            then drawGem nowTime (keyColor key) key $ Just $ 1 - realToFrac (nowTime - thisTime) / fadeTime
+            then drawGem nowTime ntype (keyColor key) key $ Just $ 1 - realToFrac (nowTime - thisTime) / fadeTime
             else return ()
         -- draw past sustain if rest is empty
         when (null rest) $ do
-          forM_ notes $ \(key, pnf) -> forM_ (getPast pnf) $ \() -> do
+          forM_ notes $ \(key, pnf) -> forM_ (getPast pnf) $ \_ntype -> do
             drawSustain nearTime thisTime (keyColor key) key
         drawNotes thisTime rest
       drawTargetSquare i tex alpha = let
@@ -1977,11 +1994,7 @@ loadObj f = inside ("loading model: " <> f) $ do
     Obj.Face a b c rest <- map Obj.elValue $ V.toList $ Obj.objFaces obj
     let triangulate v1 v2 v3 vs = [v1, v2, v3] ++ case vs of
           []    -> []
-          h : t -> triangulateExtra v1 v2 v3 h t
-        triangulateExtra v1 v2 v3 v4 vs = [v1, v3, v4] ++ case vs of
-          []    -> []
-          h : t -> triangulateExtra v2 v3 v4 h t
-        -- above is implemented according to https://stackoverflow.com/a/43422763
+          h : t -> triangulate v1 v3 h t
     faceIndex <- triangulate a b c rest
     let loc      = Obj.objLocations obj V.! (Obj.faceLocIndex faceIndex - 1)
         texCoord = Obj.objTexCoords obj V.! (fromMaybe 0 (Obj.faceTexCoordIndex faceIndex) - 1)

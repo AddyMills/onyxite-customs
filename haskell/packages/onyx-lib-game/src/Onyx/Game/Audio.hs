@@ -38,7 +38,7 @@ import           Onyx.Audio.Render            (computeChannelsPlan,
                                                loadSamplesFromBuildDir,
                                                manualLeaf)
 import           Onyx.Audio.Search
-import           Onyx.FFMPEG                  (ffSourceBinkFrom)
+import           Onyx.FFMPEG                  (ffSourceBinkFrom, ffSourceFrom)
 import           Onyx.Harmonix.MOGG
 import           Onyx.Import
 import           Onyx.Project
@@ -281,6 +281,12 @@ bikSecsSpeed pos mspeed bik = do
   let adjustSpeed = maybe id (\speed -> stretchRealtime (recip speed) 1) mspeed
   return $ CA.mapSamples CA.integralSample $ adjustSpeed src
 
+ffSecsSpeed :: (MonadResource m) => Double -> Maybe Double -> Readable -> IO (CA.AudioSource m Int16)
+ffSecsSpeed pos mspeed audio = do
+  src <- ffSourceFrom (CA.Seconds pos) $ Left audio
+  let adjustSpeed = maybe id (\speed -> stretchRealtime (recip speed) 1) mspeed
+  return $ CA.mapSamples CA.integralSample $ adjustSpeed src
+
 data PlanAudio t a = PlanAudio
   { expr :: Audio t a
   , pans :: [Double]
@@ -346,6 +352,11 @@ projectAudio k proj = case lookup k $ HM.toList (projectSongYaml proj).plans of
       bik = takeDirectory proj.projectLocation </> path
       in return $ \t speed gain -> do
         src <- bikSecsSpeed t speed $ fileReadable bik
+        playSource (map realToFrac x.pans) (map realToFrac x.vols) gain src
+    Just path | takeExtension path /= ".mogg" -> let
+      audio = takeDirectory proj.projectLocation </> path
+      in return $ \t speed gain -> do
+        src <- ffSecsSpeed t speed $ fileReadable audio
         playSource (map realToFrac x.pans) (map realToFrac x.vols) gain src
     _ -> do
       -- TODO maybe silence crowd channels

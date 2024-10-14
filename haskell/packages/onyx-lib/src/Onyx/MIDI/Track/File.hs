@@ -665,7 +665,7 @@ interpretMIDIFile (Song tempos mmap trks) = do
     unnamed -> warn $ show (length unnamed) ++ " MIDI track(s) with no track name"
   return $ Song tempos mmap file
 
-readMIDIFile' :: (SendMessage m, ParseFile f) => F.T T.Text -> StackTraceT m (Song (f U.Beats))
+readMIDIFile' :: (ParseFile f, SendMessage m) => F.T T.Text -> StackTraceT m (Song (f U.Beats))
 readMIDIFile' mid = readMIDIFile mid >>= interpretMIDIFile
 
 loadRawMIDI :: (SendMessage m, MonadIO m) => FilePath -> StackTraceT m (F.T T.Text)
@@ -682,10 +682,10 @@ loadMIDIBytes r = do
     mapM_ warn warnings
     return mid
 
-loadMIDI :: (SendMessage m, MonadIO m, ParseFile f) => FilePath -> StackTraceT m (Song (f U.Beats))
+loadMIDI :: (ParseFile f, SendMessage m, MonadIO m) => FilePath -> StackTraceT m (Song (f U.Beats))
 loadMIDI f = loadRawMIDI f >>= readMIDIFile'
 
-loadMIDIReadable :: (SendMessage m, MonadIO m, ParseFile f) => Readable -> StackTraceT m (Song (f U.Beats))
+loadMIDIReadable :: (ParseFile f, SendMessage m, MonadIO m) => Readable -> StackTraceT m (Song (f U.Beats))
 loadMIDIReadable r = loadRawMIDIReadable r >>= readMIDIFile'
 
 showMIDIFile :: Song [RTB.T U.Beats (E.T T.Text)] -> F.T T.Text

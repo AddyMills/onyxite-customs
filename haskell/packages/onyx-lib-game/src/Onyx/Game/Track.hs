@@ -41,6 +41,7 @@ import           Onyx.MIDI.Track.Mania
 import qualified Onyx.MIDI.Track.ProGuitar        as PG
 import           Onyx.MIDI.Track.Rocksmith
 import           Onyx.Mode
+import           Onyx.PhaseShift.Dance            (NoteType (..))
 import           Onyx.Preferences                 (EliteDrumLayoutHint)
 import           Onyx.Project                     hiding (Difficulty)
 import qualified Onyx.Reaper.Extract              as RPP
@@ -83,11 +84,11 @@ type IsOverdrive = Bool
 
 displayPartName :: F.PartName -> T.Text
 displayPartName = \case
-  F.PartGuitar  -> "Guitar"
-  F.PartBass    -> "Bass"
-  F.PartDrums   -> "Drums"
-  F.PartKeys    -> "Keys"
-  F.PartVocal   -> "Vocal"
+  F.PartGuitar -> "Guitar"
+  F.PartBass   -> "Bass"
+  F.PartDrums  -> "Drums"
+  F.PartKeys   -> "Keys"
+  F.PartVocal  -> "Vocal"
   F.PartName t -> T.unwords $ map T.toTitle $ T.words $ T.replace "-" " " t
 
 data HihatEvent
@@ -141,13 +142,13 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
     return (chart, trk)
 
   maniaTrack src = let
-    assigned :: RTB.T U.Beats (LongNote () Int)
+    assigned :: RTB.T U.Beats (LongNote () (Int, NoteType))
     assigned
       = splitEdges
       $ fmap (\(key, len) -> ((), key, len))
       $ edgeBlips_ minSustainLengthRB
-      $ getManiaNormalNotes src
-    assignedMap :: Map.Map Double (Map.Map Int (PNF.PNF () ()))
+      $ maniaNotes src
+    assignedMap :: Map.Map Double (Map.Map Int (PNF.PNF NoteType NoteType))
     assignedMap
       = rtbToMap
       $ buildStatus PNF.empty
@@ -156,23 +157,23 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
     buildStatus _    RNil                 = RNil
     buildStatus prev (Wait dt edges rest) = let
       applyEdge edge = case edge of
-        Blip _ key -> Map.alter (\case
-          Nothing          -> Just $ PNF.N ()
-          Just PNF.Empty   -> Just $ PNF.N ()
-          Just (PNF.P  ()) -> Just $ PNF.PN () ()
-          Just (PNF.PF ()) -> Just $ PNF.PN () ()
-          x                -> x -- shouldn't happen
+        Blip _ (key, ntype) -> Map.alter (\case
+          Nothing         -> Just $ PNF.N ntype
+          Just PNF.Empty  -> Just $ PNF.N ntype
+          Just (PNF.P  _) -> Just $ PNF.PN ntype ntype
+          Just (PNF.PF _) -> Just $ PNF.PN ntype ntype
+          x               -> x -- shouldn't happen
           ) key
-        NoteOn () key -> Map.alter (\case
-          Nothing          -> Just $ PNF.NF () ()
-          Just PNF.Empty   -> Just $ PNF.NF () ()
-          Just (PNF.P  ()) -> Just $ PNF.PNF () () ()
-          Just (PNF.PF ()) -> Just $ PNF.PNF () () ()
-          x                -> x -- shouldn't happen
+        NoteOn () (key, ntype) -> Map.alter (\case
+          Nothing         -> Just $ PNF.NF ntype ntype
+          Just PNF.Empty  -> Just $ PNF.NF ntype ntype
+          Just (PNF.P  _) -> Just $ PNF.PNF ntype ntype ntype
+          Just (PNF.PF _) -> Just $ PNF.PNF ntype ntype ntype
+          x               -> x -- shouldn't happen
           ) key
-        NoteOff key -> Map.update (\case
-          PNF.PF () -> Just $ PNF.P ()
-          x         -> Just x -- could happen if Blip or NoteOn was applied first
+        NoteOff (key, ntype) -> Map.update (\case
+          PNF.PF _ -> Just $ PNF.P ntype
+          x        -> Just x -- could happen if Blip or NoteOn was applied first
           ) key
       this = foldr applyEdge (PNF.after prev) edges
       in Wait dt this $ buildStatus this rest

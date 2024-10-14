@@ -21,6 +21,7 @@ library
     , async
     , stm
     , containers
+    , split
   default-language: Haskell2010
   pkgconfig-depends:
       libavutil

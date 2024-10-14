@@ -34,6 +34,9 @@ import           Onyx.Audio                       (Audio (..), audioIO,
                                                    audioRateReadable,
                                                    buildSource', loadAudioInput)
 import           Onyx.CloneHero.SNG
+import           Onyx.Encore                      (EncoreInfo (..),
+                                                   encoreMidiToFoF,
+                                                   loadEncoreInfo)
 import           Onyx.FeedBack.Load               (chartToBeats, chartToIni,
                                                    chartToMIDI, loadChartFile,
                                                    loadChartReadable)
@@ -44,9 +47,6 @@ import           Onyx.Guitar                      (HOPOsAlgorithm (HOPOsRBGuitar
                                                    computeFiveFretSHT,
                                                    emitGuitar5, emitGuitar5PS,
                                                    noOpenNotes)
-import           Onyx.Import.Encore               (EncoreInfo (..),
-                                                   encoreMidiToFoF,
-                                                   loadEncoreInfo)
 import           Onyx.MIDI.Common                 (Difficulty (..),
                                                    StrumHOPOTap (..),
                                                    isNoteEdge)

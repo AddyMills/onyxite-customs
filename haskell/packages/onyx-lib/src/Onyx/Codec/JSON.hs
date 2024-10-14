@@ -29,6 +29,7 @@ import qualified Data.Vector                as V
 import qualified Data.Yaml                  as Y
 import           Onyx.Codec.Common
 import           Onyx.StackTrace
+import           Onyx.Util.Text.Decode      (decodeGeneral)
 import           Onyx.YAMLTree              (readYAMLTree)
 
 #if MIN_VERSION_base(4,18,0)
@@ -214,10 +215,16 @@ fromJSON = codecIn stackJSON
 yamlEncodeFile :: (Y.ToJSON a) => FilePath -> a -> IO ()
 yamlEncodeFile f x = B.writeFile f $ Y.encode x
 
-loadYaml :: (SendMessage m, StackJSON a, MonadIO m) => FilePath -> StackTraceT m a
+loadYaml :: (StackJSON a, SendMessage m, MonadIO m) => FilePath -> StackTraceT m a
 loadYaml fp = do
   yaml <- readYAMLTree fp
   mapStackTraceT (`runReaderT` yaml) fromJSON
+
+loadJSON :: (StackJSON a, SendMessage m, MonadIO m) => FilePath -> StackTraceT m a
+loadJSON f = do
+  -- assume utf-8 but also support utf-16 with BOM
+  json <- stackIO (B.readFile f) >>= decodeJSONText . decodeGeneral
+  mapStackTraceT (`runReaderT` json) fromJSON
 
 -- This should use Data.Aeson.eitherDecodeStrictText but we need to upgrade (all platforms) to aeson-2.2.1.0 first
 decodeJSONText :: (MonadFail m) => T.Text -> m A.Value

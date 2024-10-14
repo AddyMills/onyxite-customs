@@ -10,9 +10,6 @@ module Onyx.Import.Ragnarock (importRagnarock) where
 import           Control.Monad                    (forM, guard)
 import           Control.Monad.Codec
 import           Control.Monad.IO.Class           (MonadIO)
-import           Control.Monad.Trans.Reader
-import qualified Data.Aeson                       as A
-import qualified Data.ByteString                  as B
 import qualified Data.EventList.Absolute.TimeBody as ATB
 import qualified Data.EventList.Relative.TimeBody as RTB
 import qualified Data.HashMap.Strict              as HM
@@ -166,9 +163,6 @@ instance StackJSON Note where
 importRagnarock :: (SendMessage m, MonadIO m) => FilePath -> Import m
 importRagnarock pathInfo level = do
   let dir = takeDirectory pathInfo
-      loadJSON f = do
-        json <- stackIO (B.readFile f) >>= either fatal return . A.eitherDecodeStrict
-        mapStackTraceT (`runReaderT` json) fromJSON
   info <- loadJSON pathInfo
   let _ = info :: InfoDat
   art <- case info.coverImageFilename of
