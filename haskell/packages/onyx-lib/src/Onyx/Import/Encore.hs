@@ -26,11 +26,14 @@ import           Onyx.Import.Base
 import           Onyx.MIDI.Common                 (Difficulty (..), Edge (..),
                                                    joinEdgesSimple,
                                                    splitEdgesSimple)
+import           Onyx.MIDI.Track.Events           (EventsTrack (..))
 import qualified Onyx.MIDI.Track.File             as F
 import           Onyx.MIDI.Track.Mania
 import           Onyx.PhaseShift.Dance            (NoteType (..))
 import           Onyx.Project                     hiding (Difficulty)
 import qualified Onyx.Project                     as P
+import           Onyx.Sections                    (addSectionNumbers,
+                                                   simpleSection)
 import           Onyx.StackTrace                  (SendMessage, lg, stackIO)
 import           Onyx.Util.Files                  (fixFileCase)
 import           Onyx.Util.Handle                 (Readable, fileReadable)
@@ -45,11 +48,11 @@ importEncore :: (SendMessage m, MonadIO m) => FilePath -> Import m
 importEncore dir level = do
   when (level == ImportFull) $ lg $ "Importing Encore song from: " <> dir
 
-  info <- loadEncoreInfo $ dir </> "info.json"
+  info <- fixFileCase (dir </> "info.json") >>= loadEncoreInfo
 
   mid <- case level of
     ImportQuick -> return emptyChart
-    ImportFull  -> F.loadMIDIReadable @EncoreFile $ fileReadable info.midi
+    ImportFull  -> fixFileCase info.midi >>= F.loadMIDIReadable @EncoreFile . fileReadable
 
   let existingPaths :: [FilePath] -> IO [FilePath]
       existingPaths paths = flip mapMaybeM paths $ \p -> do
@@ -70,6 +73,13 @@ importEncore dir level = do
   audioVocals  <- stackIO $ audioFor "vocals"
   audioBacking <- stackIO $ audioFor "backing"
 
+  art <- case info.art of
+    Nothing -> return Nothing
+    Just f  -> do
+      f' <- fixFileCase f
+      e <- stackIO $ Dir.doesFileExist f'
+      return $ guard e >> Just f'
+
   return SongYaml
     { metadata = Metadata
       { title         = Just info.title
@@ -82,7 +92,7 @@ importEncore dir level = do
         xs -> Just $ T.intercalate ", " xs
       , subgenre      = Nothing
       , year          = info.release_year >>= readMaybe . T.unpack
-      , fileAlbumArt  = flip fmap info.art $ \f ->
+      , fileAlbumArt  = flip fmap art $ \f ->
         SoftFile ("album" <.> takeExtension f) $ SoftReadable $ fileReadable f
       , trackNumber   = Nothing
       , comments      = []
@@ -160,7 +170,15 @@ encoreToOnyxMIDI = fmap $ \encore -> mempty
       { F.onyxPartMania = encorePart encore.partVocals
       })
     ]
-  , F.onyxEvents   = encore.events
+  , F.onyxEvents   = if RTB.null encore.events.eventsSections
+    then let
+      sections = fmap
+        (\(name, num) -> simpleSection $ case num of
+          Nothing -> name
+          Just n  -> T.unwords [name, T.pack $ show n]
+        ) (addSectionNumbers encore.section.events)
+      in encore.events { eventsSections = sections }
+    else encore.events
   , F.onyxBeat     = encore.beat
   } where
     encorePart :: EncorePart U.Beats -> Map.Map T.Text (ManiaTrack U.Beats)

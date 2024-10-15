@@ -21,8 +21,7 @@ import qualified Numeric.NonNegative.Class        as NNC
 import           Onyx.MIDI.Common                 (Difficulty (..), Edge (..),
                                                    blipEdgesRBNice, each,
                                                    isNoteEdgeCPV, makeEdge',
-                                                   makeEdgeCPV, pattern RNil,
-                                                   pattern Wait)
+                                                   makeEdgeCPV, pattern Wait)
 import           Onyx.MIDI.Read                   (ChannelType (..),
                                                    ParseTrack (..),
                                                    channelBlip_, condenseMap,
@@ -315,13 +314,7 @@ makeRRSections sects = let
   markers = flip fmap decideCustom $ \case
     Left  s      -> s
     Right custom -> SectionCustom $ fromMaybe (maxCustomSections - 1) $ elemIndex custom customList
-  addNumbers _    RNil            = RNil
-  addNumbers prev (Wait t x rest) = let
-    num = case (length $ filter (== x) prev, any (== x) rest) of
-      (0, False) -> Nothing
-      (n, _    ) -> Just $ n + 1
-    in Wait t (x, num) $ addNumbers (x : prev) rest
-  in (addNumbers [] markers, customList)
+  in (addSectionNumbers markers, customList)
 
 data RRControl t = RRControl
   { rrcAnimDrummer   :: RTB.T t Int -- DrummerSignalRuleActions.lua, (Male|Female)DrummerAnimations.lua

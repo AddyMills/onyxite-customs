@@ -2,6 +2,7 @@
 {-# LANGUAGE NoFieldSelectors    #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE PatternSynonyms     #-}
 {-# LANGUAGE TupleSections       #-}
 module Onyx.Sections
 ( SectionType(..), Section(..)
@@ -13,16 +14,19 @@ module Onyx.Sections
 , makeRB2Section
 , makeGH2Section
 , fromGH2Section
+, addSectionNumbers
 ) where
 
-import           Data.Char         (isAscii, isDigit, isPrint)
-import           Data.List         (sort)
-import           Data.List.HT      (partitionMaybe)
-import           Data.Maybe        (fromMaybe)
-import qualified Data.Text         as T
-import           Onyx.FretsOnFire  (stripTags)
-import           Onyx.Sections.GH2 (gh2Sections)
-import           Onyx.Sections.RB3 (findRBN2Section)
+import           Data.Char                        (isAscii, isDigit, isPrint)
+import qualified Data.EventList.Relative.TimeBody as RTB
+import           Data.List                        (sort)
+import           Data.List.HT                     (partitionMaybe)
+import           Data.Maybe                       (fromMaybe)
+import qualified Data.Text                        as T
+import           Onyx.FretsOnFire                 (stripTags)
+import           Onyx.MIDI.Common                 (pattern RNil, pattern Wait)
+import           Onyx.Sections.GH2                (gh2Sections)
+import           Onyx.Sections.RB3                (findRBN2Section)
 
 data SectionType
   = SectionRB2 -- @[section foo]@
@@ -135,3 +139,13 @@ makeGH2Section = underscoreForm -- TODO look up in gh2Sections
 
 fromGH2Section :: T.Text -> T.Text
 fromGH2Section s = fromMaybe s $ lookup s gh2Sections
+
+addSectionNumbers :: (Eq a) => RTB.T t a -> RTB.T t (a, Maybe Int)
+addSectionNumbers = let
+  go _    RNil            = RNil
+  go prev (Wait t x rest) = let
+    num = case (length $ filter (== x) prev, any (== x) rest) of
+      (0, False) -> Nothing
+      (n, _    ) -> Just $ n + 1
+    in Wait t (x, num) $ go (x : prev) rest
+  in go []
