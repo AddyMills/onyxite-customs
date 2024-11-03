@@ -173,9 +173,17 @@ encoreToOnyxMIDI = fmap $ \encore -> mempty
   , F.onyxEvents   = if RTB.null encore.events.eventsSections
     then let
       sections = fmap
-        (\(name, num) -> simpleSection $ case num of
-          Nothing -> name
-          Just n  -> T.unwords [name, T.pack $ show n]
+        (\(name, num) -> let
+          name' = case name of
+            "solo_guitar" -> "gtr_solo"
+            "solo_vocals" -> "vocal_solo"
+            "solo_keys"   -> "keyboard_solo"
+            "solo_drums"  -> "drum_solo"
+            "solo_bass"   -> "bass_solo"
+            _             -> name
+          in simpleSection $ case num of
+            Nothing -> name'
+            Just n  -> T.unwords [name', T.pack $ show n]
         ) (addSectionNumbers encore.section.events)
       in encore.events { eventsSections = sections }
     else encore.events
