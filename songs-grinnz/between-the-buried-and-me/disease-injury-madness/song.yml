@@ -14,9 +14,18 @@ audio:
     file-path: ../../../sound/hihat-foot.wav
   countin:
     samples: {}
+  no-guitars:
+    # from Sheet Happens
+    file-path: "03 Disease, Injury, Madness Jam Track - No Guitars.mp3"
+  stems-no-guitars:
+    file-path: audio-stems-no-guitars.wav
+    commands:
+    - ../../../scripts/stems AUDIO(no-guitars) audio-stems-no-guitars.wav
+    channels: 8
 plans:
   album:
     song:
+      &song
       mix:
       - countin
       - fade:
@@ -25,6 +34,19 @@ plans:
         - trim:
           - '9:11.247'
           - concatenate: [album-obfuscation, album-disease]
+  dev:
+    song: *song
+    parts:
+      no-guitars:
+        pad: [2.310, no-guitars]
+      stem-bass:
+        pad: [2.310, channels: [[0, 1], stems-no-guitars]]
+      stem-drums:
+        pad: [2.310, channels: [[2, 3], stems-no-guitars]]
+      stem-vocal:
+        pad: [2.310, channels: [[4, 5], stems-no-guitars]]
+      stem-keys:
+        pad: [2.310, channels: [[6, 7], stems-no-guitars]]
 parts:
   drums:
     drums:
@@ -43,12 +65,16 @@ parts:
 targets:
   rb3:
     game: rb3
+    plan: album
   rb3-2x:
     game: rb3
     2x-bass-pedal: true
+    plan: album
   ps:
     game: ps
+    plan: album
   rs:
     game: rs
     arrangements:
     - [bonus-rhythm, bass]
+    plan: album

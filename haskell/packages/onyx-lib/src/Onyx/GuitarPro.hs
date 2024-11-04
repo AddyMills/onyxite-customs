@@ -49,6 +49,7 @@ data GPIF = GPIF
   , beats       :: V.Vector Beat
   , notes       :: V.Vector Note
   , rhythms     :: V.Vector Rhythm
+  -- ScoreViews
   } deriving (Show)
 
 instance IsInside GPIF where
@@ -73,6 +74,7 @@ instance IsInside GPIF where
       (parseInside' $ bareList $ isTag "Note" $ parseInside' insideCodec)
     rhythms     <- (.rhythms)    =. childTag "Rhythms"
       (parseInside' $ bareList $ isTag "Rhythm" $ parseInside' insideCodec)
+    ignoreChildTag "ScoreViews"
     return GPIF{..}
 
 data Score = Score
@@ -127,6 +129,7 @@ data MasterTrack = MasterTrack
   { tracks      :: [Int]
   , automations :: V.Vector Automation
   -- RSE
+  , anacrusis   :: Bool
   } deriving (Show)
 
 instance IsInside MasterTrack where
@@ -135,6 +138,7 @@ instance IsInside MasterTrack where
     automations <- (.automations) =. childTag "Automations"
       (parseInside' $ bareList $ isTag "Automation" $ parseInside' insideCodec)
     ignoreChildTag "RSE"
+    anacrusis   <- (.anacrusis)   =. emptyTagOpt "Anacrusis"
     return MasterTrack{..}
 
 data Automation = Automation
@@ -161,12 +165,14 @@ data Track = Track
   , name        :: T.Text
   , shortName   :: T.Text
   , color       :: [Int]
-  -- SystemsDefautLayout, SystemsLayout, PalmMute, AutoAccentuation, PlayingStyle, Instrument (.gpx), UseOneChannelPerString, IconId, InstrumentSet
+  , palmMute    :: Maybe Double
+  -- SystemsDefautLayout, SystemsLayout, AutoAccentuation, PlayingStyle, Instrument (.gpx), UseOneChannelPerString, IconId, InstrumentSet
   , transpose   :: Maybe Transpose -- not in .gpx, has <PartSounding> instead
   -- RSE, ForcedSound, Sounds, MidiConnection, PlaybackState, AudioEngineState, Lyrics
   , staves      :: Maybe (V.Vector Staff) -- not in .gpx
   , automations :: Maybe (V.Vector Automation) -- not in .gpx
   , properties  :: Maybe Properties -- only in .gpx
+  , autoBrush   :: Bool
   } deriving (Show)
 
 instance IsInside Track where
@@ -177,7 +183,7 @@ instance IsInside Track where
     color       <- (.color)       =. childTag "Color" (parseInside' listOfInts)
     ignoreChildTag "SystemsDefautLayout"
     ignoreChildTag "SystemsLayout"
-    ignoreChildTag "PalmMute"
+    palmMute    <- (.palmMute)    =. childTagOpt "PalmMute" (parseInside' $ milliText childText)
     ignoreChildTag "AutoAccentuation"
     ignoreChildTag "PlayingStyle"
     ignoreChildTag "Instrument"
@@ -197,6 +203,7 @@ instance IsInside Track where
     automations <- (.automations) =. childTagOpt "Automations"
       (parseInside' $ bareList $ isTag "Automation" $ parseInside' insideCodec)
     properties <- (.properties) =. childTagOpt "Properties" (parseInside' insideCodec)
+    autoBrush <- (.autoBrush) =. emptyTagOpt "AutoBrush"
     return Track{..}
 
 data Transpose = Transpose
@@ -344,28 +351,52 @@ instance IsInside Property where
     return Property{..}
 
 data MasterBar = MasterBar
-  { key       :: Key
-  , time      :: T.Text
-  -- Repeat, Section, Fermatas
-  , doubleBar :: Bool -- true if empty DoubleBar tag is present
-  , bars      :: [Int]
+  { key              :: Key
+  , time             :: T.Text
+  , repeat_          :: Maybe Repeat
+  -- Section, Fermatas
+  , doubleBar        :: Bool -- true if empty DoubleBar tag is present
+  , bars             :: [Int]
   -- XProperties
+  , alternateEndings :: Maybe T.Text -- seen one number, not sure of format for multiple numbers
+  , freeTime         :: Bool -- true if empty FreeTime tag is present
+  , tripletFeel      :: Maybe T.Text -- seen Triplet16th
   } deriving (Show)
 
 instance IsInside MasterBar where
   insideCodec = do
     key       <- (.key)       =. childTag "Key"  (parseInside' insideCodec)
     time      <- (.time)      =. childTag "Time" (parseInside' childText)
-    ignoreChildTag "Repeat"
+    repeat_   <- (.repeat_)   =. childTagOpt "Repeat" (parseInside' insideCodec)
     ignoreChildTag "Section"
     ignoreChildTag "Fermatas"
-    doubleBar <- (.doubleBar) =. dimap
-      (\b -> guard b >> Just ())
-      isJust
-      (childTagOpt "DoubleBar" $ return ())
+    doubleBar <- (.doubleBar) =. emptyTagOpt "DoubleBar"
     bars      <- (.bars)      =. childTag "Bars" (parseInside' listOfInts)
     ignoreChildTag "XProperties"
+    alternateEndings <- (.alternateEndings) =. childTagOpt "AlternateEndings" (parseInside' childText)
+    freeTime <- (.freeTime) =. emptyTagOpt "FreeTime"
+    tripletFeel <- (.tripletFeel) =. childTagOpt "TripletFeel" (parseInside' childText)
     return MasterBar{..}
+
+-- TODO this should warn if a parsed tag is not empty
+emptyTagOpt :: (SendMessage m) => ParseName -> InsideCodec m Bool
+emptyTagOpt tag = dimap
+  (\b -> guard b >> Just ())
+  isJust
+  (childTagOpt tag $ return ())
+
+data Repeat = Repeat
+  { start :: Bool
+  , end   :: Bool
+  , count :: Int
+  } deriving (Show)
+
+instance IsInside Repeat where
+  insideCodec = do
+    start <- (.start) =. boolWordText (reqAttr "start")
+    end   <- (.end)   =. boolWordText (reqAttr "end")
+    count <- (.count) =. intText      (reqAttr "count")
+    return Repeat{..}
 
 data Key = Key
   { accidentalCount :: Int
@@ -407,18 +438,23 @@ instance IsInside Voice where
     return Voice{..}
 
 data Beat = Beat
-  { id_        :: Int
-  , graceNotes :: Maybe T.Text
+  { id_                                :: Int
+  , graceNotes                         :: Maybe T.Text
   -- Bank (.gpx)
-  , dynamic_   :: T.Text
-  , rhythm     :: RhythmRef
+  , dynamic_                           :: T.Text
+  , rhythm                             :: RhythmRef
   -- TransposedPitchStemOrientation, ConcertPitchStemOrientation
-  , arpeggio   :: Maybe T.Text
-  , variation  :: Maybe Int
-  , freeText   :: Maybe T.Text
-  , notes      :: Maybe [Int]
-  , properties :: Properties
+  , arpeggio                           :: Maybe T.Text
+  , variation                          :: Maybe Int
+  , freeText                           :: Maybe T.Text
+  , notes                              :: Maybe [Int]
+  , properties                         :: Properties
   -- XProperties
+  , tremolo                            :: Maybe T.Text
+  , whammy                             :: Maybe Whammy
+  , fadding                            :: Maybe T.Text -- FadeIn, presumably also FadeOut?
+  , userTransposedPitchStemOrientation :: Maybe T.Text -- Upward, Downward
+  , wah                                :: Maybe T.Text -- seen Closed
   } deriving (Show)
 
 instance IsInside Beat where
@@ -436,7 +472,34 @@ instance IsInside Beat where
     notes      <- (.notes)      =. childTagOpt "Notes" (parseInside' listOfInts)
     properties <- (.properties) =. childTag "Properties" (parseInside' insideCodec)
     ignoreChildTag "XProperties"
+    tremolo    <- (.tremolo)    =. childTagOpt "Tremolo" (parseInside' childText)
+    whammy     <- (.whammy)     =. childTagOpt "Whammy" (parseInside' insideCodec)
+    fadding    <- (.fadding)    =. childTagOpt "Fadding" (parseInside' childText)
+    userTransposedPitchStemOrientation <- (.userTransposedPitchStemOrientation) =. childTagOpt "UserTransposedPitchStemOrientation" (parseInside' childText)
+    wah        <- (.wah)        =. childTagOpt "Wah" (parseInside' childText)
     return Beat{..}
+
+data Whammy = Whammy
+  -- not sure if all of these need to be there
+  { originValue       :: Double
+  , middleValue       :: Double
+  , destinationValue  :: Double
+  , originOffset      :: Double
+  , middleOffset1     :: Double
+  , middleOffset2     :: Double
+  , destinationOffset :: Double
+  } deriving (Show)
+
+instance IsInside Whammy where
+  insideCodec = do
+    originValue       <- (.originValue)       =. milliText (reqAttr "originValue"      )
+    middleValue       <- (.middleValue)       =. milliText (reqAttr "middleValue"      )
+    destinationValue  <- (.destinationValue)  =. milliText (reqAttr "destinationValue" )
+    originOffset      <- (.originOffset)      =. milliText (reqAttr "originOffset"     )
+    middleOffset1     <- (.middleOffset1)     =. milliText (reqAttr "middleOffset1"    )
+    middleOffset2     <- (.middleOffset2)     =. milliText (reqAttr "middleOffset2"    )
+    destinationOffset <- (.destinationOffset) =. milliText (reqAttr "destinationOffset")
+    return Whammy{..}
 
 newtype RhythmRef = RhythmRef
   { ref :: Int
@@ -456,6 +519,7 @@ data Note = Note
   , tie                    :: Maybe Tie
   , vibrato                :: Maybe T.Text
   , antiAccent             :: Maybe T.Text
+  , letRing                :: Bool
   } deriving (Show)
 
 instance IsInside Note where
@@ -468,6 +532,7 @@ instance IsInside Note where
     tie                    <- (.tie                   ) =. childTagOpt "Tie" (parseInside' insideCodec)
     vibrato                <- (.vibrato               ) =. childTagOpt "Vibrato" (parseInside' childText)
     antiAccent             <- (.antiAccent            ) =. childTagOpt "AntiAccent" (parseInside' childText)
+    letRing                <- (.letRing               ) =. emptyTagOpt "LetRing"
     return Note{..}
 
 data Tie = Tie

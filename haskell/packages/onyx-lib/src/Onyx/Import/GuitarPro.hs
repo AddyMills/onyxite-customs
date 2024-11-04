@@ -12,8 +12,9 @@ import qualified Data.EventList.Absolute.TimeBody as ATB
 import qualified Data.EventList.Relative.TimeBody as RTB
 import           Data.Foldable                    (toList)
 import qualified Data.HashMap.Strict              as HM
+import           Data.List                        (sort)
 import qualified Data.Map                         as Map
-import           Data.Maybe                       (catMaybes, fromMaybe, isJust,
+import           Data.Maybe                       (fromMaybe, isJust,
                                                    listToMaybe)
 import qualified Data.Text                        as T
 import qualified Data.Vector                      as V
@@ -58,15 +59,19 @@ readTimeSig ts = case T.splitOn "/" ts of
 readTempo :: T.Text -> Maybe U.BPS
 readTempo t = case T.words t of
   [x, y] -> do
-    base  <- readMaybe $ T.unpack x :: Maybe Double
-    ratio <- readMaybe $ T.unpack y :: Maybe Int
-    -- 1 means base 8th notes per minute, 2 means base quarter notes per minute?
-    return $ (realToFrac base / 60) / (4 / (2 ^^ ratio))
+    perMinute <- readMaybe $ T.unpack x :: Maybe Double
+    eights    <- readMaybe $ T.unpack y :: Maybe Int
+    -- 1 means base 8th notes per minute, 2 means base quarter notes per minute,
+    -- 3 means base dotted quarter notes
+    return $ U.makeTempo (fromIntegral eights * 0.5) (60 / realToFrac perMinute)
   _ -> Nothing
+
+-- TODO need to apply MasterBar TripletFeel to modify timing
 
 timingGPIF :: (Monad m) => GPIF -> StackTraceT m (U.TempoMap, U.MeasureMap)
 timingGPIF gpif = do
-  timeSigs <- forM (zip (V.toList gpif.masterBars) [0..]) \(mb, mbIndex) -> do
+  let expanded = expandRepeats $ V.toList gpif.masterBars
+  timeSigs <- forM expanded \(mbIndex, mb) -> do
     inside ("MasterBar index " <> show (mbIndex :: Int)) do
     case readTimeSig mb.time of
       Nothing -> fatal $ "Couldn't understand time signature: " <> show mb.time
@@ -74,16 +79,48 @@ timingGPIF gpif = do
   let assembleMMap sigs = foldr ($) RNil
         $ zipWith Wait (0 : map U.timeSigLength sigs) sigs
       mmap = U.measureMapFromTimeSigs U.Error $ assembleMMap timeSigs
-  tempoChanges <- catMaybes <$> forM (V.toList gpif.masterTrack.automations) \auto -> do
+  tempoChanges <- sort . concat <$> forM (V.toList gpif.masterTrack.automations) \auto -> do
     if auto.type_ == "Tempo"
       then case readTempo auto.value of
         Nothing  -> fatal $ "Couldn't understand tempo change: " <> show auto.value
-        Just bps -> let
-          posn = U.unapplyMeasureMap mmap (auto.bar, realToFrac auto.position)
-          in return $ Just (posn, bps)
-      else return Nothing
+        Just bps -> return $ do
+          -- need to reapply this tempo change whenever the bar is repeated
+          (expandedIndex, (originalIndex, _)) <- zip [0..] expanded
+          guard $ originalIndex == auto.bar
+          let posn = U.unapplyMeasureMap mmap (expandedIndex, realToFrac auto.position)
+          return (posn, bps)
+      else return []
   let tmap = U.tempoMapFromBPS $ RTB.fromAbsoluteEventList $ ATB.fromPairList tempoChanges
   return (tmap, mmap)
+
+expandRepeats :: [MasterBar] -> [(Int, MasterBar)]
+expandRepeats startMBs = let
+  indexed = zip [0..] startMBs
+  splitRepeats :: [(Int, MasterBar)] -> [[(Int, MasterBar)]]
+  splitRepeats []           = []
+  splitRepeats arg@(x : xs) = case break (\(_, mb) -> maybe False (.start) mb.repeat_) xs of
+    (_ , []) -> [arg]
+    (ys, zs) -> case splitOnRepeatEnd $ x : ys of
+      (c1, c2) -> if any (\(_, mb) -> isJust mb.alternateEndings) c1
+        then (x : ys) : splitRepeats zs
+        else c1 : splitRepeats (c2 <> zs)
+  splitOnRepeatEnd :: [(Int, MasterBar)] -> ([(Int, MasterBar)], [(Int, MasterBar)])
+  splitOnRepeatEnd mbs = case break (\(_, mb) -> maybe False (.end) mb.repeat_) mbs of
+    (xs, []    ) -> (xs       , [])
+    (xs, y : ys) -> (xs <> [y], ys)
+  in do
+    chunk <- splitRepeats indexed
+    let count = case chunk of
+          (_, mb) : _ -> maybe 1 (.count) mb.repeat_
+          []          -> 1
+        (base, alternates) = break (\(_, mb) -> isJust mb.alternateEndings) chunk
+    i <- [1 .. count]
+    let itxt = T.pack $ show i
+        endingStart = flip dropWhile alternates $ \(_, mb) -> case mb.alternateEndings of
+          Nothing -> True
+          Just ae -> notElem itxt $ T.splitOn "," ae
+        ending = fst $ splitOnRepeatEnd endingStart
+    base <> ending
 
 fromGPIF :: (SendMessage m) => GPIF -> StackTraceT m [(T.Text, GtrTuning, RocksmithTrack U.Beats)]
 fromGPIF gpif = do
@@ -126,7 +163,7 @@ fromGPIF gpif = do
     let stringLookup = do
           str <- [minBound .. maxBound]
           return (getStringIndex (length $ tuningPitches tuning) str, str)
-    gotBars <- forM (zip (V.toList gpif.masterBars) [0..]) \(mb, mbIndex) -> do
+    gotBars <- forM (expandRepeats $ V.toList gpif.masterBars) \(mbIndex, mb) -> do
       inside ("MasterBar index " <> show (mbIndex :: Int)) do
       bar <- case drop trackBarIndex mb.bars of
         []    -> fatal "No bar found for the track in this master bar"
@@ -163,13 +200,14 @@ fromGPIF gpif = do
                   , [ModSlap          | elem "Slapped"   enabled]
                   , [ModPluck         | elem "Popped"    enabled]
                   , [ModHammerOn      | elem "LeftHandTapped" enabled] -- TODO normal hammerons
+                  , [ModTremolo       | isJust beat.tremolo]
                   ]
                 -- for RS readability, make all fret hand mutes "open"
                 fret' = if elem ModMute mods then 0 else fret
                 {-
                   remaining stuff to import:
                   ModVibrato, ModHammerOn, ModPullOff, ModSlide, ModSlideUnpitch, ModLink,
-                  left hand info, ModRightHand, ModTremolo, ModPickUp, ModPickDown
+                  left hand info, ModRightHand, ModPickUp, ModPickDown
 
                   hopos:
                   first note has HopoOrigin, second note has HopoDestination.
