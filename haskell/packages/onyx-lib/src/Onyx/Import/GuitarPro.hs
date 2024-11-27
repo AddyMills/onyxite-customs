@@ -6,7 +6,9 @@
 {-# LANGUAGE OverloadedStrings        #-}
 module Onyx.Import.GuitarPro where
 
-import           Control.Monad                    (forM, guard)
+import           Control.Monad                    (forM, guard, when)
+import           Control.Monad.Trans.Class        (lift)
+import           Control.Monad.Trans.State.Strict (evalStateT, gets, modify)
 import           Data.Bifunctor                   (first)
 import qualified Data.EventList.Absolute.TimeBody as ATB
 import qualified Data.EventList.Relative.TimeBody as RTB
@@ -163,7 +165,8 @@ fromGPIF gpif = do
     let stringLookup = do
           str <- [minBound .. maxBound]
           return (getStringIndex (length $ tuningPitches tuning) str, str)
-    gotBars <- forM (expandRepeats $ V.toList gpif.masterBars) \(mbIndex, mb) -> do
+    -- using a local map state for remembering hopo origin frets
+    gotBars <- mapStackTraceT (`evalStateT` Map.empty) $ forM (expandRepeats $ V.toList gpif.masterBars) \(mbIndex, mb) -> do
       inside ("MasterBar index " <> show (mbIndex :: Int)) do
       bar <- case drop trackBarIndex mb.bars of
         []    -> fatal "No bar found for the track in this master bar"
@@ -175,6 +178,7 @@ fromGPIF gpif = do
           notes <- mapM getNote $ fromMaybe [] beat.notes
           -- TODO don't sustain if staccato
           rhythm <- getRhythm beat.rhythm.ref
+          let stroke = [x | Property "PickStroke" (PropertyDirection x) <- V.toList beat.properties.properties]
           gotNotes <- forM notes \note -> do
             let props = V.toList note.properties.properties
             string <- case [n | Property "String" (PropertyString n) <- props] of
@@ -186,9 +190,13 @@ fromGPIF gpif = do
             fret <- case [n | Property "Fret" (PropertyFret n) <- props] of
               []    -> fatal $ "No Fret set for note id = " <> show note.id_
               n : _ -> return n
+            maybeHopoOriginFret <- lift $ gets $ Map.lookup string
             let enabled = [x | Property x PropertyEnable <- props]
                 htype = listToMaybe [x | Property "HarmonicType" (PropertyHType x) <- props]
                 _slide = listToMaybe [x | Property "Slide" (PropertyFlags x) <- props]
+                isHOPO = elem "HopoDestination" enabled
+                isHammerOn = isHOPO && maybe False (< fret) maybeHopoOriginFret
+                isPullOff  = isHOPO && maybe False (> fret) maybeHopoOriginFret
                 mods = concat
                   [ [ModPalmMute      | elem "PalmMuted" enabled]
                   , [ModMute          | elem "Muted"     enabled]
@@ -199,19 +207,18 @@ fromGPIF gpif = do
                   , [ModTap           | elem "Tapped"    enabled || htype == Just "Tap"                    ]
                   , [ModSlap          | elem "Slapped"   enabled]
                   , [ModPluck         | elem "Popped"    enabled]
-                  , [ModHammerOn      | elem "LeftHandTapped" enabled] -- TODO normal hammerons
+                  , [ModHammerOn      | elem "LeftHandTapped" enabled || isHammerOn]
+                  , [ModPullOff       | isPullOff]
                   , [ModTremolo       | isJust beat.tremolo]
+                  , [ModPickUp        | stroke == ["Up"  ]]
+                  , [ModPickDown      | stroke == ["Down"]]
                   ]
                 -- for RS readability, make all fret hand mutes "open"
                 fret' = if elem ModMute mods then 0 else fret
                 {-
                   remaining stuff to import:
-                  ModVibrato, ModHammerOn, ModPullOff, ModSlide, ModSlideUnpitch, ModLink,
-                  left hand info, ModRightHand, ModPickUp, ModPickDown
-
-                  hopos:
-                  first note has HopoOrigin, second note has HopoDestination.
-                  need to compute whether to put hammeron or pulloff on the second note
+                  ModVibrato, ModSlide, ModSlideUnpitch, ModLink,
+                  left hand info, ModRightHand
 
                   slides:
                   slide down to undefined endpoint has <Property name="Slide"><Flags>4</Flags></Property>
@@ -224,6 +231,7 @@ fromGPIF gpif = do
                   so this means hold fret 7 and tap on fret 12 (7 + 5).
                   for rs, this should generate a hand position on 7, a note on fret 12, with tap + harmonic mods.
                 -}
+            when (elem "HopoOrigin" enabled) $ lift $ modify $ Map.insert string fret
             return ((fret', mods), midiString, note)
           duration <- case rhythmLength rhythm of
             Nothing  -> fatal $ "Couldn't understand note duration: " <> show rhythm

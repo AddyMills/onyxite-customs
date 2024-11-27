@@ -7,13 +7,35 @@ audio:
   album-track:
     md5: f7ee2d02293a31d867449932d4c4d81b
     frames: 9603216
+  no-guitars:
+    # from Sheet Happens
+    file-path: "01 Mirrors Jam Track - No Guitars.mp3"
+  stems-no-guitars:
+    file-path: audio-stems-no-guitars.wav
+    commands:
+    - ../../../scripts/stems AUDIO(no-guitars) audio-stems-no-guitars.wav
+    channels: 8
 plans:
   album:
     song:
+      &song
       fade:
         - end
         - 1.856
         - pad: [0.641, album-track]
+  dev:
+    song: *song
+    parts:
+      no-guitars:
+        pad: [0.184, no-guitars]
+      stem-bass:
+        pad: [0.184, channels: [[0, 1], stems-no-guitars]]
+      stem-drums:
+        pad: [0.184, channels: [[2, 3], stems-no-guitars]]
+      stem-vocal:
+        pad: [0.184, channels: [[4, 5], stems-no-guitars]]
+      stem-keys:
+        pad: [0.184, channels: [[6, 7], stems-no-guitars]]
 parts:
   drums:
     drums:
@@ -29,12 +51,17 @@ parts:
         global: -3 # G# C# F# B E
       tones:
         file-tone-base: ../../../tones/SatchBoogie_bass.tone2014.xml
+  keys:
+    pro-keys: {}
 targets:
   rb3:
     game: rb3
+    plan: album
   ps:
     game: ps
+    plan: album
   rs:
     game: rs
     arrangements:
     - [bonus-rhythm, bass]
+    plan: album

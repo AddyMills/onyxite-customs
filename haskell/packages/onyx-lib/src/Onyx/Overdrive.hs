@@ -22,8 +22,7 @@ import           Control.Monad                    (forM, guard, unless, void)
 import qualified Data.EventList.Absolute.TimeBody as ATB
 import qualified Data.EventList.Relative.TimeBody as RTB
 import           Data.Foldable                    (toList)
-import           Data.List.Extra                  (intercalate, nubOrd, sort,
-                                                   stripPrefix)
+import           Data.List.Extra                  (intercalate, nubOrd, sort)
 import           Data.List.NonEmpty               (NonEmpty (..))
 import qualified Data.List.NonEmpty               as NE
 import qualified Data.Map                         as Map
@@ -229,11 +228,7 @@ fixBrokenUnisons (Song tmap mmap rb3) = do
   return $ Song tmap mmap $ putOverdrive rb3 od'
 
 printFlexParts :: [PartName] -> String
-printFlexParts = let
-  part inst = let
-    s = show inst
-    in fromMaybe s $ stripPrefix "Flex" s
-  in intercalate ", " . map part
+printFlexParts = intercalate ", " . map (T.unpack . displayPartName)
 
 -- | Removes overdrive phrases to prevent partial unisons that cause errors in Magma v1.
 removePartialUnisons

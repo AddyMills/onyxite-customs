@@ -11,9 +11,18 @@ audio:
     file-path: ../../../sound/hihat-foot.wav
   countin:
     samples: {}
+  no-guitars:
+    # from Sheet Happens
+    file-path: "04 Fossil Genera (A Feed From Cloud Mountain) Jam Track - No Guitars.mp3"
+  stems-no-guitars:
+    file-path: audio-stems-no-guitars.wav
+    commands:
+    - ../../../scripts/stems AUDIO(no-guitars) audio-stems-no-guitars.wav
+    channels: 8
 plans:
   album:
     song:
+      &song
       mix:
       - countin
       - fade:
@@ -22,6 +31,19 @@ plans:
         - pad:
           - 2.667
           - album-track
+  dev:
+    song: *song
+    parts:
+      no-guitars:
+        pad: [2.422, no-guitars]
+      stem-bass:
+        pad: [2.422, channels: [[0, 1], stems-no-guitars]]
+      stem-drums:
+        pad: [2.422, channels: [[2, 3], stems-no-guitars]]
+      stem-vocal:
+        pad: [2.422, channels: [[4, 5], stems-no-guitars]]
+      stem-keys:
+        pad: [2.422, channels: [[6, 7], stems-no-guitars]]
 parts:
   drums:
     drums:
@@ -33,11 +55,25 @@ parts:
         global: -3 # G# C# F# B E
       tones:
         file-tone-base: ../../../tones/SatchBoogie_bass.tone2014.xml
+  vocal:
+    vocal: # WIP
+      count: 3
+      gender: male
+  keys:
+    pro-keys: {}
 targets:
+  rb3:
+    game: rb3
+    plan: album
   rb3-2x:
     game: rb3
     2x-bass-pedal: true
+    plan: album
+  ps:
+    game: ps
+    plan: album
   rs:
     game: rs
     arrangements:
     - [bonus-rhythm, bass]
+    plan: album

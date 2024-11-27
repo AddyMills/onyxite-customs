@@ -1189,3 +1189,12 @@ instance Command SampleTrigger where
   fromCommand = \case
     SampleTrigger "" x -> [x]
     SampleTrigger x  y -> [x, y]
+
+displayPartName :: PartName -> T.Text
+displayPartName = \case
+  PartGuitar -> "Guitar"
+  PartBass   -> "Bass"
+  PartDrums  -> "Drums"
+  PartKeys   -> "Keys"
+  PartVocal  -> "Vocal"
+  PartName t -> T.unwords $ map T.toTitle $ T.words $ T.replace "-" " " t

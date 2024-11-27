@@ -59,9 +59,11 @@ parts:
       tones:
         file-tone-base: ../../../tones/SatchBoogie_bass.tone2014.xml
   vocal:
-    vocal: # WIP
-      count: 3
+    vocal:
+      count: 3 # TODO solo
       gender: male
+  keys:
+    pro-keys: {}
 targets:
   rb3:
     game: rb3

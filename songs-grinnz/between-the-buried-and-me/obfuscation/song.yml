@@ -14,18 +14,9 @@ audio:
     file-path: ../../../sound/hihat-foot.wav
   countin:
     samples: {}
-  rbn-bass:
-    md5: 7a61310252cdf17e28b411fcfb4c328d
-    frames: 24692678
-  rbn-guitar:
-    md5: fc342c8968041266bafe9ab85151bee3
-    frames: 24692678
-  rbn-vocal:
-    md5: 564f9c94aa11f1ffa3dc1efb658e1efd
-    frames: 24692678
-  rbn-backing:
-    md5: fe9f07fb0d47739af25fe9182f2ba41b
-    frames: 24692678
+  no-guitars:
+    # from Sheet Happens
+    file-path: "02 Obfuscation Jam Track - No Guitars.mp3"
 plans:
   album:
     song:
@@ -41,10 +32,36 @@ plans:
   dev:
     song: *song
     parts:
-      rbn-bass: rbn-bass
-      rbn-guitar: rbn-guitar
-      rbn-vocal: rbn-vocal
-      rbn-backing: rbn-backing
+      rbn-drums-kick:
+        pans-vols: [[0], [0], channels: [[0], mogg: mogg]]
+      rbn-drums-snare:
+        pans-vols: [[-1, 1], [0, 0], channels: [[1, 2], mogg: mogg]]
+      rbn-drums-kit:
+        pans-vols: [[-1, 1], [0, 0], channels: [[3, 4], mogg: mogg]]
+      rbn-bass:
+        pans-vols: [[-1, 1], [0, 0], channels: [[5, 6], mogg: mogg]]
+      rbn-guitar:
+        pans-vols: [[-1, 1], [0, 0], channels: [[7, 8], mogg: mogg]]
+      rbn-vocal:
+        pans-vols: [[-1, 1], [0, 0], channels: [[9, 10], mogg: mogg]]
+      rbn-backing:
+        pans-vols: [[-1, 1], [0, 0], channels: [[11, 12], mogg: mogg]]
+      no-guitars:
+        pad: [2.543, no-guitars]
+  mogg:
+    file-mogg: UGC_5004365.mogg
+    karaoke: false
+    multitrack: true
+    pans: [0, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1]
+    vols: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    parts:
+      drums:
+        kick: [0]
+        snare: [1, 2]
+        kit: [3, 4]
+      bass: [5, 6]
+      guitar: [7, 8]
+      vocal: [9, 10]
 parts:
   drums:
     drums:
@@ -63,6 +80,8 @@ parts:
     vocal:
       count: 1
       gender: male
+  keys:
+    pro-keys: {}
 targets:
   rb3:
     game: rb3
