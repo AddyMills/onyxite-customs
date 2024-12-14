@@ -209,7 +209,7 @@ gh3Rules buildInfo dir gh3 = do
         (\lang -> dir </> "xbox" </> (dl <> "_text_" <> lang <> ".pak.xen"))
         ["f", "g", "i", "s"]
       pathSongPak = dir </> "xbox" </> (B8.unpack dlcID <> "_song.pak.xen")
-  pathDL %> \out -> gh3MysteryScript (B8.pack dl) >>= stackIO . BL.writeFile out
+  pathDL %> \out -> gh3MysteryScript (B8.pack dl) Nothing >>= stackIO . BL.writeFile out
   pathText %> \out -> do
     -- section names would also go in here, but we'll try to use the embedded section name format
     let metadata = getTargetMetadata songYaml $ GH3 gh3

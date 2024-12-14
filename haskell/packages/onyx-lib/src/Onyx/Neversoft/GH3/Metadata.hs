@@ -77,7 +77,24 @@ data GH3Language
   | GH3Spanish
   deriving (Eq, Show)
 
-readGH3TextSetDLC :: (MonadFail m, MonadIO m) => Folder T.Text Readable -> m [(GH3Language, GH3TextPakQB)]
+data GH3TextSet = GH3TextSet
+  { languages :: [(GH3Language, GH3TextPakQB)]
+  , dlcScript :: Maybe (Word32, BL.ByteString)
+  }
+
+instance Semigroup GH3TextSet where
+  x <> y = GH3TextSet
+    { languages = x.languages <> y.languages
+    , dlcScript = max x.dlcScript y.dlcScript -- keep the highest version script
+    }
+
+instance Monoid GH3TextSet where
+  mempty = GH3TextSet
+    { languages = []
+    , dlcScript = Nothing
+    }
+
+readGH3TextSetDLC :: (SendMessage m, MonadIO m) => Folder T.Text Readable -> StackTraceT m GH3TextSet
 readGH3TextSetDLC folder = let
   -- dropExtension drops either .xen or .ps3
   stripLang name = case T.pack $ dropExtension $ T.unpack $ T.toLower name of
@@ -87,19 +104,38 @@ readGH3TextSetDLC folder = let
     (T.stripSuffix "_text_i.pak" -> Just dlName) -> Just (GH3Italian, dlName)
     (T.stripSuffix "_text_s.pak" -> Just dlName) -> Just (GH3Spanish, dlName)
     _                                            -> Nothing
-  in fmap catMaybes $ forM (folderFiles folder) $ \(name, r) -> case stripLang name of
+  in fmap mconcat $ forM (folderFiles folder) $ \(name, r) -> case stripLang name of
     -- require "dl" in front to ignore GHWT files in Death Magnetic
     Just (lang, dlName) | "dl" `T.isPrefixOf` dlName -> do
       bs <- liftIO $ useHandle r handleToByteString
       text <- readGH3TextPakQBDLC bs
-      return $ Just (lang, text)
-    _ -> return Nothing
+      return GH3TextSet
+        { languages = [(lang, text)]
+        , dlcScript = Nothing
+        }
+    _ -> case T.stripSuffix ".pak" $ T.pack $ dropExtension $ T.unpack $ T.toLower name of
+      Just dlName | "dl" `T.isPrefixOf` dlName && not ("_song" `T.isSuffixOf` dlName) -> do
+        pak <- liftIO $ useHandle r handleToByteString
+        let ?endian = BigEndian
+        nodes <- splitPakNodes (pakFormatGH3 ?endian) pak Nothing
+        let filenameKey = qbKeyCRC $ "1ni76fm\\" <> B8.pack (T.unpack dlName) <> ".qb"
+        fmap mconcat $ forM nodes $ \(node, bs) -> if node.nodeFilenameKey == filenameKey && node.nodeFileType == ".qb"
+          then errorToWarning (runGetM parseQB bs) >>= return . \case
+            Nothing -> mempty
+            Just qb -> case [ v | QBSectionInteger "dlc_script_version" _ v <- qb ] of
+              []          -> mempty
+              version : _ -> GH3TextSet
+                { languages = []
+                , dlcScript = Just (version, bs)
+                }
+          else return mempty
+      _ -> return mempty
 
-loadGH3TextSetDLC :: (SendMessage m, MonadIO m) => FilePath -> StackTraceT m [(GH3Language, GH3TextPakQB)]
+loadGH3TextSetDLC :: (SendMessage m, MonadIO m) => FilePath -> StackTraceT m GH3TextSet
 loadGH3TextSetDLC f = case map toLower $ takeExtension f of
   ".pkg"  -> do
     usrdir <- stackIO (pkgFolder <$> loadPKG f) >>= getDecryptedUSRDIR
-    fmap concat $ forM (map snd $ folderSubfolders usrdir) $ \dir -> do
+    fmap mconcat $ forM (map snd $ folderSubfolders usrdir) $ \dir -> do
       readGH3TextSetDLC $ first TE.decodeLatin1 dir
   ".edat" -> do
     -- search folder for any package metadata edats and try to load them
@@ -190,10 +226,10 @@ buildGH3TextSet prefs dlName lang paks = let
 
 combineGH3SongCache360 :: (SendMessage m, MonadIO m) => [FilePath] -> FilePath -> StackTraceT m ()
 combineGH3SongCache360 ins out = do
-  sets <- fmap concat $ mapM loadGH3TextSetDLC ins
+  sets <- fmap mconcat $ mapM loadGH3TextSetDLC ins
   let dlText = "dl2000000000"
       dlBytes = B8.pack $ T.unpack dlText
-  mystery <- gh3MysteryScript dlBytes
+  mystery <- gh3MysteryScript dlBytes $ snd <$> sets.dlcScript
   prefs <- readPreferences
   let folder = Folder
         { folderSubfolders = []
@@ -208,7 +244,7 @@ combineGH3SongCache360 ins out = do
         }
       (eng, engLog) = getLanguage GH3English
       getLanguage lang = buildGH3TextSet prefs dlBytes lang
-        [ pak | (lang', pak) <- sets, lang == lang' ]
+        [ pak | (lang', pak) <- sets.languages, lang == lang' ]
   lg $ "Found " <> show (length engLog) <> " songs"
   forM_ engLog $ \line -> lg $ "- " <> T.unpack line
   thumb <- liftIO $ gh3Thumbnail >>= B.readFile
@@ -229,12 +265,12 @@ combineGH3SongCache360 ins out = do
 
 combineGH3SongCachePS3Folder :: (SendMessage m, MonadIO m, MonadResource m) => [FilePath] -> StackTraceT m (Folder B.ByteString Readable)
 combineGH3SongCachePS3Folder ins = do
-  sets <- fmap concat $ mapM loadGH3TextSetDLC ins
+  sets <- fmap mconcat $ mapM loadGH3TextSetDLC ins
   let dlText = "dl2000000000"
       dlBytes = B8.pack $ T.unpack dlText
       folderLabel = "CUSTOMS_DATABASE"
       edatConfig = gh3CustomMidEdatConfig folderLabel
-  mystery <- gh3MysteryScript dlBytes
+  mystery <- gh3MysteryScript dlBytes $ snd <$> sets.dlcScript
   prefs <- readPreferences
   let files =
         [ (dlText <> ".pak.ps3"       , mystery                     )
@@ -246,7 +282,7 @@ combineGH3SongCachePS3Folder ins = do
         ]
       (eng, engLog) = getLanguage GH3English
       getLanguage lang = buildGH3TextSet prefs dlBytes lang
-        [ pak | (lang', pak) <- sets, lang == lang' ]
+        [ pak | (lang', pak) <- sets.languages, lang == lang' ]
   lg $ "Found " <> show (length engLog) <> " songs"
   forM_ engLog $ \line -> lg $ "- " <> T.unpack line
   edats <- tempDir "onyx-gh3-ps3" $ \tmp -> do
@@ -378,10 +414,12 @@ parseSongInfoGH3 songEntries = do
   Right SongInfoGH3{..}
 
 -- Unknown contents of "dl<num>.pak.xen"
-gh3MysteryScript :: (MonadIO m) => B.ByteString -> m BL.ByteString
-gh3MysteryScript dlName = do
+gh3MysteryScript :: (MonadIO m) => B.ByteString -> Maybe BL.ByteString -> m BL.ByteString
+gh3MysteryScript dlName overrideQB = do
   -- copying hopefully-complete script from SanicStudios (DLC added bits on the end over time)
-  mysteryScript <- liftIO $ getResourcesPath "gh3-mystery-script.qb" >>= fmap BL.fromStrict . B.readFile
+  mysteryScript <- case overrideQB of
+    Nothing -> liftIO $ getResourcesPath "gh3-mystery-script.qb" >>= fmap BL.fromStrict . B.readFile
+    Just qb -> return qb
   let nodes =
         [ ( Node {nodeFileType = ".qb", nodeOffset = 0, nodeSize = 0, nodeFilenamePakKey = 0, nodeFilenameKey = unk1, nodeFilenameCRC = qbKeyCRC dlName, nodeUnknown = 0, nodeFlags = 0, nodeName = Nothing}
           , mysteryScript
@@ -391,7 +429,7 @@ gh3MysteryScript dlName = do
           )
         ]
       -- don't know the actual prefix string but this works
-      unk1 = qbKeyCRC $ "1ni76fm\\" <> dlName -- in dl15.pak it's 3159505916, in dl26.pak it's 3913805506
+      unk1 = qbKeyCRC $ "1ni76fm\\" <> dlName <> ".qb" -- in dl15.pak it's 3159505916, in dl26.pak it's 3913805506
   return $ buildPak nodes
 
 data GH3Dat = GH3Dat
