@@ -746,6 +746,14 @@ audioLengthReadable f r = case map toLower $ takeExtension f of
   -- "Estimating duration from bitrate, this may be inaccurate"
   ".ogg" -> liftIO $ Just . fromIntegral . frames
     <$> (sourceVorbis (Frames 0) r :: IO (AudioSource (ResourceT IO) Float))
+  -- ffmpeg fails to load empty opus files???
+  -- "Error: opening input: End of file"
+  -- this is a hack to fix CH export with opus audio
+  ".opus" -> do
+    size <- liftIO $ useHandle r IO.hFileSize
+    if size < 2048 -- I get 869 bytes from onyx+libsndfile; 137 bytes from ffmpeg
+      then return $ Just 0
+      else liftIO $ Just . fromIntegral . frames <$> ffSourceSimpleReadable r
   _      -> if supportedFFExt f
     then liftIO $ Just . fromIntegral . frames <$> ffSourceSimpleReadable r
     else return Nothing
