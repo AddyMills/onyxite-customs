@@ -870,10 +870,15 @@ processMIDI target songYaml origInput mixMode getAudioLength = inside "Processin
     , F.fixedLipsync2 = mempty
     , F.fixedLipsync3 = mempty
     , F.fixedLipsync4 = mempty
-    , F.fixedLipsyncJohn = mempty
-    , F.fixedLipsyncPaul = mempty
+    , F.fixedLipsyncJohn   = mempty
+    , F.fixedLipsyncPaul   = mempty
     , F.fixedLipsyncGeorge = mempty
-    , F.fixedLipsyncRingo = mempty
+    , F.fixedLipsyncRingo  = mempty
+    , F.fixedPadGuitar = mempty
+    , F.fixedPadBass   = mempty
+    , F.fixedPadKeys   = mempty
+    , F.fixedPadDrums  = mempty
+    , F.fixedPadVocals = mempty
     }, editRanks, editCount)
 
 magmaLegalTemposFile :: (SendMessage m) => F.Song (F.FixedFile U.Beats) -> StackTraceT m (F.Song (F.FixedFile U.Beats))

@@ -9,40 +9,39 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RecordWildCards       #-}
 {-# LANGUAGE StrictData            #-}
-module Onyx.Encore where
+module Onyx.Encore
+( EncoreInfo(..)
+, encoreMidiToFoF
+, loadEncoreInfo
+, EncoreFile(..)
+, module Onyx.Encore.MIDI
+) where
 
 import           Control.Monad.Codec
-import           Control.Monad.IO.Class           (MonadIO)
-import           Control.Monad.Trans.Class        (lift)
-import           Control.Monad.Trans.Reader       (ask, runReaderT)
-import qualified Data.Aeson                       as A
-import qualified Data.ByteString                  as B
-import qualified Data.EventList.Relative.TimeBody as RTB
-import qualified Data.HashMap.Strict              as HM
-import           Data.List.NonEmpty               (NonEmpty ((:|)))
-import qualified Data.Map                         as Map
-import qualified Data.Text                        as T
-import           GHC.Generics                     (Generic)
+import           Control.Monad.IO.Class     (MonadIO)
+import           Control.Monad.Trans.Class  (lift)
+import           Control.Monad.Trans.Reader (ask, runReaderT)
+import qualified Data.Aeson                 as A
+import qualified Data.ByteString            as B
+import qualified Data.HashMap.Strict        as HM
+import           Data.List.NonEmpty         (NonEmpty ((:|)))
+import qualified Data.Text                  as T
+import           GHC.Generics               (Generic)
 import           Onyx.Codec.Common
 import           Onyx.Codec.JSON
 import           Onyx.DeriveHelpers
-import           Onyx.MIDI.Common
-import           Onyx.MIDI.Read
-import           Onyx.MIDI.Track.Beat             (BeatTrack)
-import           Onyx.MIDI.Track.Drums            (Animation, DrumTrack,
-                                                   parseDrumAnimation)
-import           Onyx.MIDI.Track.Events           (EventsTrack)
-import           Onyx.MIDI.Track.File             (ParseFile (..), fileTrack)
-import           Onyx.MIDI.Track.FiveFret         (Color (..), FiveTrack,
-                                                   FretPosition, HandMap,
-                                                   StrumMap)
-import           Onyx.StackTrace                  (SendMessage, StackTraceT,
-                                                   fatal, mapStackTraceT,
-                                                   stackIO)
-import           Onyx.Util.Text.Decode            (decodeGeneral)
-import qualified Sound.MIDI.File                  as F
-import qualified Sound.MIDI.Util                  as U
-import           System.FilePath                  (takeDirectory, (</>))
+import           Onyx.Encore.MIDI
+import           Onyx.MIDI.Track.Beat       (BeatTrack)
+import           Onyx.MIDI.Track.Drums      (DrumTrack)
+import           Onyx.MIDI.Track.Events     (EventsTrack)
+import           Onyx.MIDI.Track.File       (ParseFile (..), fileTrack)
+import           Onyx.MIDI.Track.FiveFret   (FiveTrack)
+import           Onyx.StackTrace            (SendMessage, StackTraceT, fatal,
+                                             mapStackTraceT, stackIO)
+import           Onyx.Util.Text.Decode      (decodeGeneral)
+import qualified Sound.MIDI.File            as F
+import qualified Sound.MIDI.Util            as U
+import           System.FilePath            (takeDirectory, (</>))
 
 -- encore metadata
 
@@ -142,122 +141,6 @@ loadEncoreInfo f = do
   info <- mapStackTraceT (`runReaderT` json) fromJSON
   let dir = takeDirectory f
   return $ (dir </>) . T.unpack <$> info
-
--- midi file
-
-data EncorePart t = EncorePart
-  { difficulties :: Map.Map Difficulty (EncoreDifficulty t)
-  , overdrive    :: RTB.T t Bool
-  , solo         :: RTB.T t Bool -- Encore
-  , mood         :: RTB.T t Mood
-  , instrument   :: RTB.T t CharInstrument
-  } deriving (Show, Generic)
-    deriving (Semigroup, Monoid, Mergeable) via GenericMerge (EncorePart t)
-
-data EncoreDifficulty t = EncoreDifficulty
-  { gems  :: RTB.T t (Edge () Color)
-  , lifts :: RTB.T t (Edge () Color)
-  } deriving (Show, Generic)
-    deriving (Semigroup, Monoid, Mergeable) via GenericMerge (EncoreDifficulty t)
-
-data CharInstrument = CharGuitar | CharBass | CharKeytar
-  deriving (Eq, Ord, Show, Enum, Bounded)
-
-instance Command CharInstrument where
-  fromCommand = \case
-    CharGuitar -> ["guitar"]
-    CharBass   -> ["bass"  ]
-    CharKeytar -> ["keytar"]
-  toCommand = reverseLookup each fromCommand
-
-instance ParseTrack EncorePart where
-  parseTrack = do
-    difficulties <- (=.) (.difficulties) $ eachKey each $ \diff -> fatBlips (1/8) $ do
-      let base = case diff of
-            Easy   -> 60
-            Medium -> 72
-            Hard   -> 84
-            Expert -> 96
-      gems <- (.gems) =. do
-        translateEdges $ condenseMap $ eachKey each $ edges . \case
-          Green  -> base + 0
-          Red    -> base + 1
-          Yellow -> base + 2
-          Blue   -> base + 3
-          Orange -> base + 4
-      lifts <- (.lifts) =. do
-        translateEdges $ condenseMap $ eachKey each $ edges . \case
-          Green  -> base + 6
-          Red    -> base + 7
-          Yellow -> base + 8
-          Blue   -> base + 9
-          Orange -> base + 10
-      return EncoreDifficulty{..}
-    solo       <- (.solo      ) =. edges 101
-    overdrive  <- (.overdrive ) =. edges 116
-    mood       <- (.mood      ) =. command
-    instrument <- (.instrument) =. command
-    return EncorePart{..}
-
-data EncoreGuitar t = EncoreGuitar
-  { part         :: EncorePart t
-  , handMap      :: RTB.T t HandMap
-  , strumMap     :: RTB.T t StrumMap
-  , fretPosition :: RTB.T t (FretPosition, Bool)
-  } deriving (Show, Generic)
-    deriving (Semigroup, Monoid, Mergeable) via GenericMerge (EncoreGuitar t)
-
-instance ParseTrack EncoreGuitar where
-  parseTrack = do
-    part         <- (.part        ) =. parseTrack
-    handMap      <- (.handMap     ) =. command
-    strumMap     <- (.strumMap    ) =. command
-    fretPosition <- (.fretPosition) =. do
-      condenseMap $ eachKey each $ \posn -> edges $ fromEnum posn + 40
-    return EncoreGuitar{..}
-
-data EncoreDrums t = EncoreDrums
-  { part      :: EncorePart t
-  , animation :: RTB.T t Animation
-  } deriving (Show, Generic)
-    deriving (Semigroup, Monoid, Mergeable) via GenericMerge (EncoreDrums t)
-
-instance ParseTrack EncoreDrums where
-  parseTrack = do
-    part      <- (.part     ) =. parseTrack
-    animation <- (.animation) =. parseDrumAnimation
-    return EncoreDrums{..}
-
-newtype SectionTrack t = SectionTrack
-  { events :: RTB.T t T.Text
-  } deriving (Show, Generic)
-    deriving (Semigroup, Monoid, Mergeable) via GenericMerge (SectionTrack t)
-
-{-
-seen events:
-
-[intro]
-[verse]
-[prechorus]
-[chorus]
-[bridge]
-[build]
-[drop]
-[breakdown]
-[outro]
-[solo_guitar]
-[solo_vocals]
-[solo_keys]
-[solo_drums]
-[solo_bass]
--}
-
-instance ParseTrack SectionTrack where
-  parseTrack = do
-    events <- (.events) =. commandMatch'
-      (\case [x] -> Just x; _ -> Nothing)
-      return
-    return SectionTrack{..}
 
 data EncoreFile t = EncoreFile
   { partGuitar    :: EncoreGuitar t

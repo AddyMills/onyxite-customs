@@ -5,6 +5,7 @@ module Onyx.Harmonix.MOGG
 , decryptMOGG
 , decryptMOGGIfNewerThan, fixOldC3Mogg
 , decryptBink
+, checkOldC3Mogg, applyMoggPatch
 ) where
 
 import           Control.Monad                (forM, forM_, guard, void)
@@ -163,35 +164,41 @@ patchPosition pos patch origData = if pos >= B.length origData || pos + B.length
     , B.drop (pos + B.length patch) origData
     ]
 
+checkOldC3Mogg :: Readable -> IO (Maybe (Integer, B.ByteString))
+checkOldC3Mogg r = useHandle r $ \h -> do
+  encType <- BL.hGet h 4 >>= runGetM getWord32le
+  hSeek h AbsoluteSeek 16
+  numEntries <- BL.hGet h 4 >>= runGetM getWord32le
+  let patchLocation = 20 + fromIntegral numEntries * 8 + 16 + 16
+  hSeek h AbsoluteSeek patchLocation
+  mask <- B.hGet h 16
+  return $ listToMaybe $ do
+    (maybeEncType, badMask, goodMask) <- c3PS3MaskSubstitutions
+    guard $ maybe True (== encType) maybeEncType && mask == badMask
+    return (patchLocation, goodMask)
+
+applyMoggPatch :: (Integer, B.ByteString) -> Readable -> Readable
+applyMoggPatch (patchLocation, goodMask) r = Readable
+  { rFilePath = Nothing
+  , rOpen = do
+    h <- rOpen r
+    sh <- simplifyHandle h
+    openSimpleHandle (handleLabel h <> " | patch bad mogg keymask") sh
+      { shRead = \n -> do
+        pos <- shTell sh
+        origData <- shRead sh n
+        return $ patchPosition (fromIntegral $ patchLocation - pos) goodMask origData
+      }
+  }
+
 fixOldC3Mogg :: Readable -> Readable
 fixOldC3Mogg r = Readable
   { rFilePath = Nothing
-  , rOpen = do
-    -- first figure out if we need to patch
-    patch <- useHandle r $ \h -> do
-      encType <- BL.hGet h 4 >>= runGetM getWord32le
-      hSeek h AbsoluteSeek 16
-      numEntries <- BL.hGet h 4 >>= runGetM getWord32le
-      let patchLocation = 20 + fromIntegral numEntries * 8 + 16 + 16
-      hSeek h AbsoluteSeek patchLocation
-      mask <- B.hGet h 16
-      return $ listToMaybe $ do
-        (maybeEncType, badMask, goodMask) <- c3PS3MaskSubstitutions
-        guard $ maybe True (== encType) maybeEncType && mask == badMask
-        return (patchLocation, goodMask)
-    case patch of
-      -- need to patch, wrap the original handle and modify output
-      Just (patchLocation, goodMask) -> do
-        h <- rOpen r
-        sh <- simplifyHandle h
-        openSimpleHandle (handleLabel h <> " | fixOldC3Mogg") sh
-          { shRead = \n -> do
-            pos <- shTell sh
-            origData <- shRead sh n
-            return $ patchPosition (fromIntegral $ patchLocation - pos) goodMask origData
-          }
-      -- don't need to patch, just pass through
-      Nothing -> rOpen r
+  , rOpen = checkOldC3Mogg r >>= rOpen . \case
+    -- need to patch, wrap the original handle and modify output
+    Just patch -> applyMoggPatch patch r
+    -- don't need to patch, just pass through
+    Nothing    -> r
   }
 
 -- Only decrypts moggs that are too new for RB3 (> 0x10) or RB2 (> 0x0F).

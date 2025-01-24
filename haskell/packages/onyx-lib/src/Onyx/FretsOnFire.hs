@@ -61,6 +61,11 @@ data Song = Song
   , diffRhythm         :: Maybe Int
   , diffDrumsRealPS    :: Maybe Int
   , diffKeysRealPS     :: Maybe Int
+  , diffGuitarPad      :: Maybe Int
+  , diffBassPad        :: Maybe Int
+  , diffDrumsPad       :: Maybe Int
+  , diffVocalsPad      :: Maybe Int
+  , diffKeysPad        :: Maybe Int
   , delay              :: Maybe Int
   , starPowerNote      :: Maybe Int -- ^ can be @star_power_note@ or @multiplier_note@
   , eighthNoteHOPO     :: Maybe Bool
@@ -102,7 +107,6 @@ data Song = Song
   icon
   playlist_track
   vocal_gender
-  diff_{guitar,bass,drums,vocals,keys}_pad
   -}
   } deriving (Eq, Ord, Show)
 
@@ -113,7 +117,7 @@ instance Default Song where
     def def def def def def def def def def
     def def def def def def def def def def
     def def def def def def def def def def
-    def
+    def def def def def def
 
 data PSTuning = PSTuning
   { offsets :: [Int]
@@ -222,6 +226,11 @@ loadSong r = do
       diffRhythm = int "diff_rhythm"
       diffDrumsRealPS = int "diff_drums_real_ps"
       diffKeysRealPS = int "diff_keys_real_ps"
+      diffGuitarPad = int "diff_guitar_pad"
+      diffBassPad = int "diff_bass_pad"
+      diffDrumsPad = int "diff_drums_pad"
+      diffVocalsPad = int "diff_vocals_pad"
+      diffKeysPad = int "diff_keys_pad"
       delay = int "delay"
       starPowerNote = int "star_power_note" <|> int "multiplier_note"
       eighthNoteHOPO = bool "eighthnote_hopo"
@@ -287,6 +296,11 @@ songToIniContents ini = execWriter $ do
   shown "diff_rhythm" ini.diffRhythm
   shown "diff_drums_real_ps" ini.diffDrumsRealPS
   shown "diff_keys_real_ps" ini.diffKeysRealPS
+  shown "diff_guitar_pad" ini.diffGuitarPad
+  shown "diff_bass_pad" ini.diffBassPad
+  shown "diff_drums_pad" ini.diffDrumsPad
+  shown "diff_vocals_pad" ini.diffVocalsPad
+  shown "diff_keys_pad" ini.diffKeysPad
   shown "delay" ini.delay
   shown "star_power_note" ini.starPowerNote
   shown "multiplier_note" ini.starPowerNote

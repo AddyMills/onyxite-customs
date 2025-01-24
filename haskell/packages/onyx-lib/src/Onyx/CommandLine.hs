@@ -96,7 +96,9 @@ import qualified Onyx.Harmonix.DTA.Serialize.RockBand as D
 import           Onyx.Harmonix.GH2.File               (GH2File (..))
 import           Onyx.Harmonix.GH2.PartGuitar         (nullPart)
 import           Onyx.Harmonix.Magma                  (getRBAFile, runMagmaMIDI)
-import           Onyx.Harmonix.MOGG                   (decryptBink,
+import           Onyx.Harmonix.MOGG                   (applyMoggPatch,
+                                                       checkOldC3Mogg,
+                                                       decryptBink,
                                                        encryptMOGGFiles,
                                                        moggToOggFiles,
                                                        oggToMoggFiles)
@@ -1420,6 +1422,29 @@ commands =
         F.saveMIDIUtf8 fmid raw'
         return [fmid]
       _ -> fatal "Expected 1 argument (MIDI file)"
+    }
+
+  , Command
+    { commandWord = "fix-mogg"
+    , commandDesc = "Fix incorrect keymask values applied by old versions of C3 CON Tools. Can be applied in-place or to a new file."
+    , commandUsage = T.unlines
+      [ "onyx fix-mogg in.mogg"
+      , "onyx fix-mogg in.mogg --to out.mogg"
+      ]
+    , commandList = True
+    , commandRun = \args opts -> case args of
+      [fin] -> do
+        fout <- outputFile opts $ return fin
+        let r = fileReadable fin
+        stackIO (checkOldC3Mogg r) >>= \case
+          Just patch -> tempDir "onyx-fix-mogg" $ \tmp -> do
+            let ftmp = tmp </> "out.mogg"
+            stackIO $ saveReadable (applyMoggPatch patch r) ftmp
+            stackIO $ Dir.copyFile ftmp fout
+            lg "Edited MOGG keymask value."
+          Nothing -> when (fin /= fout) $ stackIO $ Dir.copyFile fin fout
+        return [fout]
+      _ -> fatal "Expected 1 argument (MOGG file)"
     }
 
   ]

@@ -2188,7 +2188,7 @@ pageQuickConvertRB sink rect tab startTasks = mdo
             _   -> "-" <> show n
           packNumberUSRDIR n = case packs of
             [_] -> ""
-            _   -> B8.pack $ show n
+            _   -> "-" <> B8.pack (show n)
           in sink $ EventOnyx $ stackIO getFormat >>= \case
             QCOutputLoosePS3 -> do
               defDir <- getDefaultPS3Dir

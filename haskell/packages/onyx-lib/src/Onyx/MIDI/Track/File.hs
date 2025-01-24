@@ -43,6 +43,7 @@ import           Development.Shake                 (Action, need)
 import           GHC.Generics                      (Generic)
 import qualified Numeric.NonNegative.Class         as NNC
 import           Onyx.DeriveHelpers
+import           Onyx.Encore.MIDI
 import           Onyx.Guitar                       (noExtendedSustains',
                                                     standardBlipThreshold,
                                                     standardSustainGap)
@@ -171,6 +172,12 @@ data FixedFile t = FixedFile
   , fixedEvents           :: EventsTrack t
   , fixedBeat             :: BeatTrack t
   , fixedVenue            :: VenueTrack t
+  , fixedPadGuitar        :: EncoreGuitar t
+  , fixedPadBass          :: EncoreGuitar t
+  , fixedPadKeys          :: EncoreGuitar t
+  , fixedPadDrums         :: EncoreDrums t
+  , fixedPadVocals        :: EncorePart t
+  -- TODO encore plastic vocals (5-fret)
   } deriving (Eq, Ord, Show, Generic)
     deriving (Semigroup, Monoid, Mergeable) via GenericMerge (FixedFile t)
 
@@ -180,7 +187,7 @@ instance HasEvents FixedFile where
 
 instance TraverseTrack FixedFile where
   traverseTrack fn
-    (FixedFile a b c d e f g h i j k l m n o p q r s t u v w x y z aa bb cc dd ee ff gg hh ii jj kk)
+    (FixedFile a b c d e f g h i j k l m n o p q r s t u v w x y z aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp)
     = FixedFile
       <$> traverseTrack fn a <*> traverseTrack fn b <*> traverseTrack fn c
       <*> traverseTrack fn d <*> traverseTrack fn e <*> traverseTrack fn f
@@ -201,6 +208,11 @@ instance TraverseTrack FixedFile where
       <*> traverseTrack fn ii
       <*> traverseTrack fn jj
       <*> traverseTrack fn kk
+      <*> traverseTrack fn ll
+      <*> traverseTrack fn mm
+      <*> traverseTrack fn nn
+      <*> traverseTrack fn oo
+      <*> traverseTrack fn pp
 
 instance ParseFile FixedFile where
   parseFile = do
@@ -241,6 +253,11 @@ instance ParseFile FixedFile where
     fixedEvents           <- (.fixedEvents          ) =. fileTrack ("EVENTS"              :| [])
     fixedBeat             <- (.fixedBeat            ) =. fileTrack ("BEAT"                :| [])
     fixedVenue            <- (.fixedVenue           ) =. fileTrack ("VENUE"               :| [])
+    fixedPadGuitar        <- (.fixedPadGuitar       ) =. fileTrack ("PAD GUITAR"          :| [])
+    fixedPadBass          <- (.fixedPadBass         ) =. fileTrack ("PAD BASS"            :| [])
+    fixedPadKeys          <- (.fixedPadKeys         ) =. fileTrack ("PAD KEYS"            :| [])
+    fixedPadDrums         <- (.fixedPadDrums        ) =. fileTrack ("PAD DRUMS"           :| [])
+    fixedPadVocals        <- (.fixedPadVocals       ) =. fileTrack ("PAD VOCALS"          :| [])
     return FixedFile{..}
 
 newtype PartName = PartName T.Text
@@ -898,36 +915,36 @@ instance ChopTrack OnyxPart where
 
 onyxToFixed :: OnyxFile U.Beats -> FixedFile U.Beats
 onyxToFixed o = FixedFile
-  { fixedPartDrums        = inPart PartDrums                 (.onyxPartDrums)
-  , fixedPartDrums2x      = inPart PartDrums                 (.onyxPartDrums2x)
-  , fixedPartRealDrumsPS  = inPart PartDrums                 (.onyxPartRealDrumsPS)
-  , fixedPartEliteDrums   = inPart PartDrums                 (.onyxPartEliteDrums)
-  , fixedPartGuitar       = inPart PartGuitar                (.onyxPartGuitar)
-  , fixedPartBass         = inPart PartBass                  (.onyxPartGuitar)
-  , fixedPartKeys         = inPart PartKeys                  (.onyxPartKeys)
+  { fixedPartDrums        = inPart PartDrums                (.onyxPartDrums)
+  , fixedPartDrums2x      = inPart PartDrums                (.onyxPartDrums2x)
+  , fixedPartRealDrumsPS  = inPart PartDrums                (.onyxPartRealDrumsPS)
+  , fixedPartEliteDrums   = inPart PartDrums                (.onyxPartEliteDrums)
+  , fixedPartGuitar       = inPart PartGuitar               (.onyxPartGuitar)
+  , fixedPartBass         = inPart PartBass                 (.onyxPartGuitar)
+  , fixedPartKeys         = inPart PartKeys                 (.onyxPartKeys)
   , fixedPartRhythm       = inPart (PartName "rhythm")      (.onyxPartGuitar)
   , fixedPartGuitarCoop   = inPart (PartName "guitar-coop") (.onyxPartGuitar)
-  , fixedPartRealGuitar   = inPart PartGuitar                (.onyxPartRealGuitar)
-  , fixedPartRealGuitar22 = inPart PartGuitar                (.onyxPartRealGuitar22)
-  , fixedPartRealBass     = inPart PartBass                  (.onyxPartRealGuitar)
-  , fixedPartRealBass22   = inPart PartBass                  (.onyxPartRealGuitar22)
-  , fixedPartGuitarGHL    = inPart PartGuitar                (.onyxPartSix)
-  , fixedPartBassGHL      = inPart PartBass                  (.onyxPartSix)
-  , fixedPartRealKeysE    = inPart PartKeys                  (.onyxPartRealKeysE)
-  , fixedPartRealKeysM    = inPart PartKeys                  (.onyxPartRealKeysM)
-  , fixedPartRealKeysH    = inPart PartKeys                  (.onyxPartRealKeysH)
-  , fixedPartRealKeysX    = inPart PartKeys                  (.onyxPartRealKeysX)
-  , fixedPartKeysAnimLH   = inPart PartKeys                  (.onyxPartKeysAnimLH)
-  , fixedPartKeysAnimRH   = inPart PartKeys                  (.onyxPartKeysAnimRH)
-  , fixedPartVocals       = inPart PartVocal                 (.onyxPartVocals)
+  , fixedPartRealGuitar   = inPart PartGuitar               (.onyxPartRealGuitar)
+  , fixedPartRealGuitar22 = inPart PartGuitar               (.onyxPartRealGuitar22)
+  , fixedPartRealBass     = inPart PartBass                 (.onyxPartRealGuitar)
+  , fixedPartRealBass22   = inPart PartBass                 (.onyxPartRealGuitar22)
+  , fixedPartGuitarGHL    = inPart PartGuitar               (.onyxPartSix)
+  , fixedPartBassGHL      = inPart PartBass                 (.onyxPartSix)
+  , fixedPartRealKeysE    = inPart PartKeys                 (.onyxPartRealKeysE)
+  , fixedPartRealKeysM    = inPart PartKeys                 (.onyxPartRealKeysM)
+  , fixedPartRealKeysH    = inPart PartKeys                 (.onyxPartRealKeysH)
+  , fixedPartRealKeysX    = inPart PartKeys                 (.onyxPartRealKeysX)
+  , fixedPartKeysAnimLH   = inPart PartKeys                 (.onyxPartKeysAnimLH)
+  , fixedPartKeysAnimRH   = inPart PartKeys                 (.onyxPartKeysAnimRH)
+  , fixedPartVocals       = inPart PartVocal                (.onyxPartVocals)
   , fixedPartDance        = mempty
-  , fixedHarm1            = inPart PartVocal                 (.onyxHarm1)
-  , fixedHarm2            = inPart PartVocal                 (.onyxHarm2)
-  , fixedHarm3            = inPart PartVocal                 (.onyxHarm3)
-  , fixedLipsync1         = inPart PartVocal                 (.onyxLipsync1)
-  , fixedLipsync2         = inPart PartVocal                 (.onyxLipsync2)
-  , fixedLipsync3         = inPart PartVocal                 (.onyxLipsync3)
-  , fixedLipsync4         = inPart PartVocal                 (.onyxLipsync4)
+  , fixedHarm1            = inPart PartVocal                (.onyxHarm1)
+  , fixedHarm2            = inPart PartVocal                (.onyxHarm2)
+  , fixedHarm3            = inPart PartVocal                (.onyxHarm3)
+  , fixedLipsync1         = inPart PartVocal                (.onyxLipsync1)
+  , fixedLipsync2         = inPart PartVocal                (.onyxLipsync2)
+  , fixedLipsync3         = inPart PartVocal                (.onyxLipsync3)
+  , fixedLipsync4         = inPart PartVocal                (.onyxLipsync4)
   , fixedLipsyncJohn      = mempty
   , fixedLipsyncPaul      = mempty
   , fixedLipsyncGeorge    = mempty
@@ -935,6 +952,11 @@ onyxToFixed o = FixedFile
   , fixedEvents           = o.onyxEvents
   , fixedBeat             = o.onyxBeat
   , fixedVenue            = o.onyxVenue
+  , fixedPadGuitar        = mempty
+  , fixedPadBass          = mempty
+  , fixedPadKeys          = mempty
+  , fixedPadDrums         = mempty
+  , fixedPadVocals        = mempty
   } where inPart p f = maybe mempty f $ Map.lookup p o.onyxParts
 
 fixedToOnyx :: FixedFile U.Beats -> OnyxFile U.Beats

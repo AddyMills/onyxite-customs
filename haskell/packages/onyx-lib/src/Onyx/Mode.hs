@@ -347,9 +347,13 @@ nativeProKeys part = flip fmap part.proKeys $ \ppk input -> let
     }
 
 getManiaNormalTopDifficulty :: (NNC.C t) => ModeMania -> F.OnyxPart t -> RTB.T t (RB.Edge () Int)
-getManiaNormalTopDifficulty pm part = case Map.lookup (NE.last pm.charts).name part.onyxPartMania of
-  Nothing  -> RTB.empty
-  Just trk -> getManiaNormalNotes trk
+getManiaNormalTopDifficulty pm part = let
+  chart = NE.last pm.charts
+  in case Map.lookup chart.name part.onyxPartMania of
+    Nothing  -> RTB.empty
+    Just trk -> case chart.style of
+      ManiaEncore -> getEncoreNotes trk
+      _           -> getManiaNormalNotes trk
 
 maniaToProKeys :: Part f -> Maybe BuildProKeys
 maniaToProKeys part = do
@@ -658,21 +662,25 @@ maniaToDrums part = flip fmap part.mania $ \pm dtarget input -> let
     $ RTB.mapMaybe (\case RB.EdgeOn _ n -> Just n; RB.EdgeOff _ -> Nothing)
     $ maniaChordSnap
     $ getManiaNormalTopDifficulty pm input.part
+  encorePassthrough = (NE.last pm.charts).style == ManiaEncore && keyCount <= 5
   notes :: RTB.T U.Beats (D.Gem D.ProType)
-  notes = if keyCount <= laneCount
-    then keyToDrum <$> inputNotes
-    else RTB.fromAbsoluteEventList $ ATB.fromPairList
-      $ map (\(t, n) -> (realToFrac t, keyToDrum n))
-      $ autoChart laneCount
-      $ map (first realToFrac) $ ATB.toPairList $ RTB.toAbsoluteEventList 0 inputNotes
+  notes = if encorePassthrough
+    then encoreKeyToDrum <$> inputNotes
+    else if keyCount <= laneCount
+      then keyToDrum <$> inputNotes
+      else RTB.fromAbsoluteEventList $ ATB.fromPairList
+        $ map (\(t, n) -> (realToFrac t, keyToDrum n))
+        $ autoChart laneCount
+        $ map (first realToFrac) $ ATB.toPairList $ RTB.toAbsoluteEventList 0 inputNotes
   laneCount = case dtarget of
     DrumTargetGH -> 5
     _            -> 4
   -- TODO maybe put turntable lane on kick?
-  keyToDrum :: Int -> D.Gem D.ProType
+  keyToDrum, encoreKeyToDrum :: Int -> D.Gem D.ProType
   keyToDrum n = case dtarget of
     DrumTargetGH -> [D.Red, D.Pro D.Yellow D.Tom, D.Pro D.Blue D.Tom, D.Orange, D.Pro D.Green D.Tom] !! n
     _            -> [D.Red, D.Pro D.Yellow D.Tom, D.Pro D.Blue D.Tom,           D.Pro D.Green D.Tom] !! n
+  encoreKeyToDrum n = [D.Kick, D.Red, D.Pro D.Yellow D.Tom, D.Pro D.Blue D.Tom, D.Pro D.Green D.Tom] !! n
   mode = case dtarget of
     DrumTargetGH -> Drums5
     _            -> Drums4
@@ -687,7 +695,7 @@ maniaToDrums part = flip fmap part.mania $ \pm dtarget input -> let
       $ U.applyTempoTrack input.tempo notes
       :: RTB.T U.Beats D.Animation
     , source = "converted Mania chart to drums"
-    , autochart = keyCount > laneCount
+    , autochart = keyCount > laneCount && not encorePassthrough
     , eliteDrums = Nothing
     }
 

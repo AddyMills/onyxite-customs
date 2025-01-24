@@ -55,8 +55,12 @@ instance ParseTrack ManiaTrack where
       }
     return ManiaTrack{..}
 
-getManiaNormalNotes :: (NNC.C t) => ManiaTrack t -> RTB.T t (Edge () Int)
-getManiaNormalNotes mt = RTB.mapMaybe
+getManiaNormalNotes, getEncoreNotes :: (NNC.C t) => ManiaTrack t -> RTB.T t (Edge () Int)
+getManiaNormalNotes = getManiaNormalNotes' False
+getEncoreNotes      = getManiaNormalNotes' True
+
+getManiaNormalNotes' :: (NNC.C t) => Bool -> ManiaTrack t -> RTB.T t (Edge () Int)
+getManiaNormalNotes' keepLift mt = RTB.mapMaybe
   (\case
     EdgeOn () (k, noteType) -> guard (keep noteType) >> Just (EdgeOn () k)
     EdgeOff   (k, noteType) -> guard (keep noteType) >> Just (EdgeOff   k)
@@ -65,7 +69,7 @@ getManiaNormalNotes mt = RTB.mapMaybe
   where keep = \case
           NoteNormal -> True
           NoteMine   -> False
-          NoteLift   -> False
+          NoteLift   -> keepLift
           NoteRoll   -> True
 
 danceDifficultyName :: SMDifficulty -> T.Text

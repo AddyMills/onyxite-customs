@@ -10,7 +10,7 @@
 {-# LANGUAGE TypeApplications      #-}
 module Onyx.Import.Encore where
 
-import           Control.Monad.Extra              (guard, mapMaybeM, when)
+import           Control.Monad.Extra              (forM, guard, mapMaybeM, when)
 import           Control.Monad.IO.Class           (MonadIO)
 import qualified Data.EventList.Relative.TimeBody as RTB
 import           Data.Foldable                    (toList)
@@ -19,7 +19,8 @@ import qualified Data.List.NonEmpty               as NE
 import qualified Data.Map                         as Map
 import           Data.Maybe                       (listToMaybe)
 import qualified Data.Text                        as T
-import           Onyx.Audio                       (Audio (..))
+import           Onyx.Audio                       (Audio (..),
+                                                   audioChannelsReadable)
 import           Onyx.Encore
 import           Onyx.Guitar                      (applyStatus)
 import           Onyx.Import.Base
@@ -80,6 +81,19 @@ importEncore dir level = do
       e <- stackIO $ Dir.doesFileExist f'
       return $ guard e >> Just f'
 
+  audios <- do
+    let pairs = [audioDrums, audioBass, audioLead, audioVocals, audioBacking] >>= toList >>= toList
+    fmap HM.fromList $ forM pairs $ \(f, r) -> do
+      chans <- audioChannelsReadable r
+      return (T.pack f, AudioFile AudioInfo
+        { md5      = Nothing
+        , frames   = Nothing
+        , filePath = Just $ SoftFile f $ SoftReadable r
+        , commands = []
+        , rate     = Nothing
+        , channels = chans
+        })
+
   return SongYaml
     { metadata = Metadata
       { title         = Just info.title
@@ -120,16 +134,7 @@ importEncore dir level = do
       , fileBackgroundImage = Nothing
       , ..
       }
-    , audio = HM.fromList $ do
-      (f, r) <- [audioDrums, audioBass, audioLead, audioVocals, audioBacking] >>= toList >>= toList
-      return (T.pack f, AudioFile AudioInfo
-        { md5      = Nothing
-        , frames   = Nothing
-        , filePath = Just $ SoftFile f $ SoftReadable r
-        , commands = []
-        , rate     = Nothing
-        , channels = 2 -- TODO verify?
-        })
+    , audio = audios
     , jammit = HM.empty
     , plans = HM.singleton "encore" $ StandardPlan StandardPlanInfo
       { song        = fmap (fmap $ (\(f, _) -> Named $ T.pack f)) audioBacking

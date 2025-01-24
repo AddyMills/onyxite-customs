@@ -75,6 +75,9 @@ readTextPakQB bs pab mqs = do
           , ("jamsession_songlist" , "jamsession_songlist_props" )
           , ("debug_songlist"      , "debug_songlist_props"      )
           , ("tutorial_songlist"   , "tutorial_songlist_props"   )
+          -- more addy custom sources
+          , ("gh5_2_songlist"      , "gh5_2_songlist_props"      )
+          -- TODO we can probably read other custom ones from the qbs directly
           ]
         structs = do
           QBSectionStruct structID fileID (QBStructHeader : songs) <- qb

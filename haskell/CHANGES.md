@@ -1,5 +1,17 @@
 # Version history
 
+# 20250101
+
+* Import from Encore format
+  * Pad tracks including lifts are displayed in preview
+  * CH Quick Convert can directly convert to CH-compatible format
+    (`song.ini` or `.sng`)
+* Import from Guitar Hero 6 (early WoR) prototype disc
+* Improve GH3 cache creator to preserve custom scripting
+  from AddyMills's toolkit
+* Fix an audio error when converting some formats such as GHWT/GHWoR
+  to Clone Hero with Opus audio
+
 # 20240928
 
 * Change Clone Hero output to use newer open note encoding
