@@ -8,6 +8,8 @@ metadata:
   subgenre: prog
   artist: Dream Theater
   file-album-art: ../night-terror/cover.jpg
+  preview-start: prc_chorus_1
+  difficulty: 7
 plans:
   album:
     song:
@@ -36,6 +38,9 @@ audio:
     - ../../../scripts/youtube r3UJNDvMe8s 140
   hihat:
     file-path: ../../../sound/hihat-foot.wav
+  hihat-quiet:
+    expr:
+      gain: [0.5, hihat]
   countin:
     samples: {}
   stems:
@@ -48,6 +53,7 @@ parts:
     drums:
       kicks: both
       mode: elite
+      difficulty: 6
 targets:
   rb3:
     game: rb3
