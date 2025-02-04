@@ -501,6 +501,7 @@ chartToMIDI chart = Song (getTempos chart) (getSignatures chart) <$> do
       fixedPadKeys          = mempty
       fixedPadDrums         = mempty
       fixedPadVocals        = mempty
+      fixedSection          = mempty
   return FixedFile{..}
 
 loadChartAsRawMIDI :: (SendMessage m, MonadIO m) => FilePath -> StackTraceT m (F.T T.Text)

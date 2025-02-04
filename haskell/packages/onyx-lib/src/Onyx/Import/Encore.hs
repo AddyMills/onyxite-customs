@@ -22,19 +22,11 @@ import qualified Data.Text                        as T
 import           Onyx.Audio                       (Audio (..),
                                                    audioChannelsReadable)
 import           Onyx.Encore
-import           Onyx.Guitar                      (applyStatus)
 import           Onyx.Import.Base
-import           Onyx.MIDI.Common                 (Difficulty (..), Edge (..),
-                                                   joinEdgesSimple,
-                                                   splitEdgesSimple)
 import           Onyx.MIDI.Track.Events           (EventsTrack (..))
 import qualified Onyx.MIDI.Track.File             as F
-import           Onyx.MIDI.Track.Mania
-import           Onyx.PhaseShift.Dance            (NoteType (..))
 import           Onyx.Project                     hiding (Difficulty)
 import qualified Onyx.Project                     as P
-import           Onyx.Sections                    (addSectionNumbers,
-                                                   simpleSection)
 import           Onyx.StackTrace                  (SendMessage, lg, stackIO)
 import           Onyx.Util.Files                  (fixFileCase)
 import           Onyx.Util.Handle                 (Readable, fileReadable)
@@ -153,7 +145,7 @@ importEncore dir level = do
       , fileTempo   = Nothing
       }
     , targets = HM.empty
-    , parts = encorePartData info.diff
+    , parts = encorePartData info.diff mid
     }
 
 encoreToOnyxMIDI :: F.Song (EncoreFile U.Beats) -> F.Song (F.OnyxFile U.Beats)
@@ -161,76 +153,38 @@ encoreToOnyxMIDI = fmap $ \encore -> mempty
   { F.onyxParts    = Map.fromList
     [ (F.PartGuitar, mempty
       { F.onyxPartGuitar = encore.plasticGuitar
-      , F.onyxPartMania = encorePart encore.partGuitar.part
+      , F.onyxPartMania = Map.fromList $ encorePart encore.partGuitar.part
       })
     , (F.PartBass, mempty
       { F.onyxPartGuitar = encore.plasticBass
-      , F.onyxPartMania = encorePart encore.partBass.part
+      , F.onyxPartMania = Map.fromList $ encorePart encore.partBass.part
       })
     , (F.PartDrums, mempty
       { F.onyxPartDrums = encore.plasticDrums
-      , F.onyxPartMania = encorePart encore.partDrums.part
+      , F.onyxPartMania = Map.fromList $ encorePart encore.partDrums.part
       })
     , (F.PartVocal, mempty
-      { F.onyxPartMania = encorePart encore.partVocals
+      { F.onyxPartMania = Map.fromList $ encorePart encore.partVocals
       })
     ]
   , F.onyxEvents   = if RTB.null encore.events.eventsSections
-    then let
-      sections = fmap
-        (\(name, num) -> let
-          name' = case name of
-            "solo_guitar" -> "gtr_solo"
-            "solo_vocals" -> "vocal_solo"
-            "solo_keys"   -> "keyboard_solo"
-            "solo_drums"  -> "drum_solo"
-            "solo_bass"   -> "bass_solo"
-            _             -> name
-          in simpleSection $ case num of
-            Nothing -> name'
-            Just n  -> T.unwords [name', T.pack $ show n]
-        ) (addSectionNumbers encore.section.events)
-      in encore.events { eventsSections = sections }
+    then encore.events { eventsSections = convertEncoreSections encore.section }
     else encore.events
   , F.onyxBeat     = encore.beat
-  } where
-    encorePart :: EncorePart U.Beats -> Map.Map T.Text (ManiaTrack U.Beats)
-    encorePart fp = Map.fromList $ do
-      diff <- [Easy, Medium, Hard, Expert]
-      let name = T.toLower $ T.pack $ show diff
-      fd <- toList $ Map.lookup diff fp.difficulties
-      return (name, ManiaTrack
-        { maniaNotes     = encoreToMania fd
-        , maniaOverdrive = fp.overdrive
-        })
+  }
 
-encoreToMania :: EncoreDifficulty U.Beats -> RTB.T U.Beats (Edge () (Int, NoteType))
-encoreToMania fd = let
-  base = joinEdgesSimple fd.gems
-  liftStatus = fmap
-    (\case
-      EdgeOn () color -> (color, True )
-      EdgeOff   color -> (color, False)
-    ) fd.lifts
-  in splitEdgesSimple $ fmap
-    (\(liftsHere, ((), color, len)) -> let
-      noteType = if elem color liftsHere then NoteLift else NoteNormal
-      in ((), (fromEnum color, noteType), len)
-    ) (applyStatus liftStatus base)
+importPadMania :: P.Difficulty -> EncorePart U.Beats -> Maybe ModeMania
+importPadMania tier part = do
+  convertedDiffs <- NE.nonEmpty $ encorePart part
+  return $ ModeMania $ flip fmap convertedDiffs $ \(name, _) -> ManiaChart
+    { name = name
+    , keys = if name == "expert" then 5 else 4
+    , style = ManiaEncore
+    , difficulty = tier
+    }
 
-encorePartData :: HM.HashMap T.Text Int -> Parts (Part f)
-encorePartData diffs = let
-
-  modePad :: P.Difficulty -> ModeMania
-  modePad tier = ModeMania $ do
-    -- TODO should check the midi to see what's actually present
-    name <- "easy" NE.:| ["medium", "hard", "expert"]
-    return ManiaChart
-      { name = name
-      , keys = if name == "expert" then 5 else 4
-      , style = ManiaEncore
-      , difficulty = tier
-      }
+encorePartData :: HM.HashMap T.Text Int -> F.Song (EncoreFile U.Beats) -> Parts (Part f)
+encorePartData diffs mid = let
 
   getTier :: [T.Text] -> Maybe P.Difficulty
   getTier options = listToMaybe $ do
@@ -254,7 +208,7 @@ encorePartData diffs = let
           }
       , mania = do
         tier <- getTier ["gr", "guitar"]
-        Just $ modePad tier
+        importPadMania tier mid.tracks.partGuitar.part
       , ..
       })
     , (F.PartBass, let Part{..} = emptyPart in Part
@@ -270,7 +224,7 @@ encorePartData diffs = let
           }
       , mania = do
         tier <- getTier ["ba", "bass"]
-        Just $ modePad tier
+        importPadMania tier mid.tracks.partBass.part
       , ..
       })
     , (F.PartDrums, let Part{..} = emptyPart in Part
@@ -282,13 +236,13 @@ encorePartData diffs = let
           }
       , mania = do
         tier <- getTier ["ds", "drums"]
-        Just $ modePad tier
+        importPadMania tier mid.tracks.partDrums.part
       , ..
       })
     , (F.PartVocal, let Part{..} = emptyPart in Part
       { mania = do
         tier <- getTier ["vl", "vocals"]
-        Just $ modePad tier
+        importPadMania tier mid.tracks.partVocals
       , ..
       })
     ]

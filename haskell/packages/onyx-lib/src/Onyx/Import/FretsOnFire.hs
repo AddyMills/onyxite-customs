@@ -34,11 +34,14 @@ import           Numeric                          (readHex)
 import qualified Numeric.NonNegative.Class        as NNC
 import           Onyx.Audio
 import           Onyx.Build.Common                (backgroundColor, squareImage)
+import           Onyx.Encore.MIDI                 (EncoreDrums (..),
+                                                   EncoreGuitar (..))
 import qualified Onyx.FeedBack.Base               as FB
 import qualified Onyx.FeedBack.Load               as FB
 import qualified Onyx.FretsOnFire                 as FoF
 import           Onyx.Guitar                      (applyStatus)
 import           Onyx.Import.Base
+import           Onyx.Import.Encore               (importPadMania)
 import           Onyx.MIDI.Common
 import           Onyx.MIDI.Track.Drums            as Drums
 import qualified Onyx.MIDI.Track.Drums.Elite      as ED
@@ -591,6 +594,7 @@ importFoF src dir level = do
               then FallbackBlue
               else FallbackGreen
             }
+        , mania = importPadMania (toTier song.diffDrumsPad) outputFixed.fixedPadDrums.part
         })
       , ( F.PartGuitar, (emptyPart :: Part SoftFile)
         { grybo = guard (isnt Five.nullFive (.fixedPartGuitar) && guardDifficulty song.diffGuitar) >> Just ModeFive
@@ -619,6 +623,7 @@ importFoF src dir level = do
           { difficulty = toTier song.diffGuitarGHL
           , hopoThreshold = hopoThreshold
           }
+        , mania = importPadMania (toTier song.diffGuitarPad) outputFixed.fixedPadGuitar.part
         })
       , ( F.PartBass, (emptyPart :: Part SoftFile)
         { grybo = guard hasBass >> Just ModeFive
@@ -647,6 +652,7 @@ importFoF src dir level = do
           { difficulty = toTier song.diffBassGHL
           , hopoThreshold = hopoThreshold
           }
+        , mania = importPadMania (toTier song.diffBassPad) outputFixed.fixedPadBass.part
         })
       , ( F.PartKeys, (emptyPart :: Part SoftFile)
         { grybo = guard (isnt Five.nullFive (.fixedPartKeys) && guardDifficulty song.diffKeys) >> Just ModeFive
@@ -661,6 +667,7 @@ importFoF src dir level = do
           { difficulty = toTier song.diffKeysReal
           , fixFreeform = False
           }
+        , mania = importPadMania (toTier song.diffKeysPad) outputFixed.fixedPadKeys.part
         })
       , ( F.PartName "rhythm", (emptyPart :: Part SoftFile)
         { grybo = guard hasRhythm >> Just ModeFive
@@ -690,6 +697,7 @@ importFoF src dir level = do
           , key = Nothing
           , lipsyncRB3 = Nothing
           }
+        , mania = importPadMania (toTier song.diffVocalsPad) outputFixed.fixedPadVocals
         })
       , ( F.PartName "dance", (emptyPart :: Part SoftFile)
         { mania = do

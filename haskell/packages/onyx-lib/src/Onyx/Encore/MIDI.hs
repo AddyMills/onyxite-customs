@@ -9,18 +9,26 @@
 {-# LANGUAGE StrictData            #-}
 module Onyx.Encore.MIDI where
 
+import           Control.Monad                    (guard)
 import           Control.Monad.Codec
 import qualified Data.EventList.Relative.TimeBody as RTB
+import           Data.Foldable                    (toList)
 import qualified Data.Map                         as Map
 import qualified Data.Text                        as T
 import           GHC.Generics                     (Generic)
 import           Onyx.DeriveHelpers
+import           Onyx.Guitar                      (applyStatus)
 import           Onyx.MIDI.Common
 import           Onyx.MIDI.Read
 import           Onyx.MIDI.Track.Drums            (Animation,
                                                    parseDrumAnimation)
 import           Onyx.MIDI.Track.FiveFret         (Color (..), FretPosition,
                                                    HandMap, StrumMap)
+import           Onyx.MIDI.Track.Mania            (ManiaTrack (..))
+import           Onyx.PhaseShift.Dance            (NoteType (..))
+import           Onyx.Sections                    (Section, addSectionNumbers,
+                                                   simpleSection)
+import qualified Sound.MIDI.Util                  as U
 
 data EncorePart t = EncorePart
   { difficulties :: Map.Map Difficulty (EncoreDifficulty t)
@@ -47,6 +55,9 @@ data EncoreDifficulty t = EncoreDifficulty
 
 instance TraverseTrack EncoreDifficulty where
   traverseTrack fn (EncoreDifficulty a b) = EncoreDifficulty <$> fn a <*> fn b
+
+nullEncore :: EncorePart t -> Bool
+nullEncore = all (RTB.null . (.gems)) . toList . (.difficulties)
 
 data CharInstrument = CharGuitar | CharBass | CharKeytar
   deriving (Eq, Ord, Show, Enum, Bounded)
@@ -155,3 +166,44 @@ instance ParseTrack SectionTrack where
       (\case [x] -> Just x; _ -> Nothing)
       return
     return SectionTrack{..}
+
+encorePart :: EncorePart U.Beats -> [(T.Text, ManiaTrack U.Beats)]
+encorePart fp = do
+  diff <- [Easy, Medium, Hard, Expert]
+  let name = T.toLower $ T.pack $ show diff
+  fd <- toList $ Map.lookup diff fp.difficulties
+  let mania = encoreToMania fd
+  guard $ not $ RTB.null mania
+  return (name, ManiaTrack
+    { maniaNotes     = mania
+    , maniaOverdrive = fp.overdrive
+    })
+
+encoreToMania :: EncoreDifficulty U.Beats -> RTB.T U.Beats (Edge () (Int, NoteType))
+encoreToMania fd = let
+  base = joinEdgesSimple fd.gems
+  liftStatus = fmap
+    (\case
+      EdgeOn () color -> (color, True )
+      EdgeOff   color -> (color, False)
+    ) fd.lifts
+  in splitEdgesSimple $ fmap
+    (\(liftsHere, ((), color, len)) -> let
+      noteType = if elem color liftsHere then NoteLift else NoteNormal
+      in ((), (fromEnum color, noteType), len)
+    ) (applyStatus liftStatus base)
+
+convertEncoreSections :: SectionTrack t -> RTB.T t Section
+convertEncoreSections sectionTrack = fmap
+  (\(name, num) -> let
+    name' = case name of
+      "solo_guitar" -> "gtr_solo"
+      "solo_vocals" -> "vocal_solo"
+      "solo_keys"   -> "keyboard_solo"
+      "solo_drums"  -> "drum_solo"
+      "solo_bass"   -> "bass_solo"
+      _             -> name
+    in simpleSection $ case num of
+      Nothing -> name'
+      Just n  -> T.unwords [name', T.pack $ show n]
+  ) (addSectionNumbers sectionTrack.events)

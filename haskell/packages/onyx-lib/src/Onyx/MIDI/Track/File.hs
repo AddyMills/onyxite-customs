@@ -178,6 +178,7 @@ data FixedFile t = FixedFile
   , fixedPadDrums         :: EncoreDrums t
   , fixedPadVocals        :: EncorePart t
   -- TODO encore plastic vocals (5-fret)
+  , fixedSection          :: SectionTrack t
   } deriving (Eq, Ord, Show, Generic)
     deriving (Semigroup, Monoid, Mergeable) via GenericMerge (FixedFile t)
 
@@ -187,7 +188,7 @@ instance HasEvents FixedFile where
 
 instance TraverseTrack FixedFile where
   traverseTrack fn
-    (FixedFile a b c d e f g h i j k l m n o p q r s t u v w x y z aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp)
+    (FixedFile a b c d e f g h i j k l m n o p q r s t u v w x y z aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq)
     = FixedFile
       <$> traverseTrack fn a <*> traverseTrack fn b <*> traverseTrack fn c
       <*> traverseTrack fn d <*> traverseTrack fn e <*> traverseTrack fn f
@@ -213,6 +214,7 @@ instance TraverseTrack FixedFile where
       <*> traverseTrack fn nn
       <*> traverseTrack fn oo
       <*> traverseTrack fn pp
+      <*> traverseTrack fn qq
 
 instance ParseFile FixedFile where
   parseFile = do
@@ -258,6 +260,7 @@ instance ParseFile FixedFile where
     fixedPadKeys          <- (.fixedPadKeys         ) =. fileTrack ("PAD KEYS"            :| [])
     fixedPadDrums         <- (.fixedPadDrums        ) =. fileTrack ("PAD DRUMS"           :| [])
     fixedPadVocals        <- (.fixedPadVocals       ) =. fileTrack ("PAD VOCALS"          :| [])
+    fixedSection          <- (.fixedSection         ) =. fileTrack ("SECTION"             :| [])
     return FixedFile{..}
 
 newtype PartName = PartName T.Text
@@ -957,6 +960,7 @@ onyxToFixed o = FixedFile
   , fixedPadKeys          = mempty
   , fixedPadDrums         = mempty
   , fixedPadVocals        = mempty
+  , fixedSection          = mempty
   } where inPart p f = maybe mempty f $ Map.lookup p o.onyxParts
 
 fixedToOnyx :: FixedFile U.Beats -> OnyxFile U.Beats
@@ -967,12 +971,14 @@ fixedToOnyx f = OnyxFile
       , onyxPartRealGuitar   = f.fixedPartRealGuitar
       , onyxPartRealGuitar22 = f.fixedPartRealGuitar22
       , onyxPartSix          = f.fixedPartGuitarGHL
+      , onyxPartMania        = Map.fromList $ encorePart f.fixedPadGuitar.part
       })
     , (PartBass, mempty
       { onyxPartGuitar       = f.fixedPartBass
       , onyxPartRealGuitar   = f.fixedPartRealBass
       , onyxPartRealGuitar22 = f.fixedPartRealBass22
       , onyxPartSix          = f.fixedPartBassGHL
+      , onyxPartMania        = Map.fromList $ encorePart f.fixedPadBass.part
       })
     , (PartKeys, mempty
       { onyxPartKeys       = f.fixedPartKeys
@@ -982,12 +988,14 @@ fixedToOnyx f = OnyxFile
       , onyxPartRealKeysX  = f.fixedPartRealKeysX
       , onyxPartKeysAnimLH = f.fixedPartKeysAnimLH
       , onyxPartKeysAnimRH = f.fixedPartKeysAnimRH
+      , onyxPartMania      = Map.fromList $ encorePart f.fixedPadKeys.part
       })
     , (PartDrums, mempty
       { onyxPartDrums       = f.fixedPartDrums
       , onyxPartDrums2x     = f.fixedPartDrums2x
       , onyxPartRealDrumsPS = f.fixedPartRealDrumsPS
       , onyxPartEliteDrums  = f.fixedPartEliteDrums
+      , onyxPartMania       = Map.fromList $ encorePart f.fixedPadDrums.part
       })
     , (PartVocal, mempty
       { onyxPartVocals = f.fixedPartVocals
@@ -998,6 +1006,7 @@ fixedToOnyx f = OnyxFile
       , onyxLipsync2   = f.fixedLipsync2
       , onyxLipsync3   = f.fixedLipsync3
       , onyxLipsync4   = f.fixedLipsync4
+      , onyxPartMania  = Map.fromList $ encorePart f.fixedPadVocals
       })
     , (PartName "rhythm", mempty
       { onyxPartGuitar = f.fixedPartRhythm
@@ -1009,7 +1018,9 @@ fixedToOnyx f = OnyxFile
       { onyxPartMania = danceToMania f.fixedPartDance
       })
     ]
-  , onyxEvents   = f.fixedEvents
+  , onyxEvents   = if RTB.null f.fixedEvents.eventsSections
+    then f.fixedEvents { eventsSections = convertEncoreSections f.fixedSection }
+    else f.fixedEvents
   , onyxBeat     = f.fixedBeat
   , onyxVenue    = f.fixedVenue
   , onyxLighting = mempty
