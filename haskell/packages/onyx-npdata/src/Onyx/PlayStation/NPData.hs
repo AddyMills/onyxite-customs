@@ -6,6 +6,7 @@ module Onyx.PlayStation.NPData
 , rb3CustomMidEdatConfig
 , ghworCustomMidEdatConfig
 , gh3CustomMidEdatConfig
+, ghaCustomMidEdatConfig
 , rockRevolutionEdatConfig
 , ghworKLIC
 , rockBandKLIC
@@ -143,6 +144,18 @@ ghworCustomMidEdatConfig pkgLabel = NPDataConfig
 gh3CustomMidEdatConfig :: B.ByteString -> NPDataConfig
 gh3CustomMidEdatConfig pkgLabel = NPDataConfig
   { npdContentID = "UP0002-BLUS30074_00-" <> pkgLabel
+  , npdKLIC      = ghworKLIC
+  , npdRAP       = Nothing
+  , npdVersion   = 2
+  , npdLicense   = 3
+  , npdType      = 0
+  , npdBlock     = 16
+  , npdEDAT      = True
+  }
+
+ghaCustomMidEdatConfig :: B.ByteString -> NPDataConfig
+ghaCustomMidEdatConfig pkgLabel = NPDataConfig
+  { npdContentID = "UP0002-BLUS30133_00-" <> pkgLabel
   , npdKLIC      = ghworKLIC
   , npdRAP       = Nothing
   , npdVersion   = 2

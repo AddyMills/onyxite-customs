@@ -18,7 +18,7 @@ import qualified Data.ByteString.Char8        as B8
 import qualified Data.ByteString.Lazy         as BL
 import           Data.Char                    (toLower)
 import           Data.Either                  (lefts, rights)
-import           Data.List.Extra              (nubOrdOn)
+import           Data.List.Extra              (nubOrd, nubOrdOn)
 import           Data.Maybe                   (catMaybes, fromMaybe,
                                                listToMaybe, mapMaybe)
 import qualified Data.Text                    as T
@@ -30,6 +30,7 @@ import           Onyx.Neversoft.CRC
 import           Onyx.Neversoft.Pak
 import           Onyx.Neversoft.QB
 import           Onyx.PlayStation.NPData      (gh3CustomMidEdatConfig,
+                                               ghaCustomMidEdatConfig,
                                                npdContentID, packNPData)
 import           Onyx.PlayStation.PKG         (getDecryptedUSRDIR, loadPKG,
                                                makePKG, pkgFolder,
@@ -56,6 +57,7 @@ import           System.FilePath              (dropExtension, takeDirectory,
 data GH3TextPakQB = GH3TextPakQB
   { gh3TextPakSongStructs :: [(QBKey, [QBStructItem QSResult QBKey])]
   , gh3OtherNodes         :: [(Node, BL.ByteString)] -- used to get section names later
+  , gh3Game               :: Maybe GH3Game
   } deriving (Show)
 
 readGH3TextPakQBDisc :: (MonadFail m, ?endian :: ByteOrder) => BL.ByteString -> BL.ByteString -> m GH3TextPakQB
@@ -76,6 +78,11 @@ data GH3Language
   | GH3Italian
   | GH3Spanish
   deriving (Eq, Show)
+
+data GH3Game
+  = GuitarHero3
+  | GuitarHeroAerosmith
+  deriving (Eq, Ord, Show)
 
 data GH3TextSet = GH3TextSet
   { languages :: [(GH3Language, GH3TextPakQB)]
@@ -169,6 +176,7 @@ buildGH3TextSet prefs dlName lang paks = let
     $ nubOrdOn fst
     $ paks >>= (.gh3TextPakSongStructs)
   allSongIDs = map fst allSongData
+  isAerosmith = any (\pak -> pak.gh3Game == Just GuitarHeroAerosmith) paks
   metadataQB =
     ( Node
       { nodeFileType       = ".qb"
@@ -182,11 +190,11 @@ buildGH3TextSet prefs dlName lang paks = let
       , nodeName           = Nothing
       }
     , putQB $ discardQS
-      [ QBSectionStruct 1293449288 unk1
+      [ QBSectionStruct "GH3_Download_Songs" unk1
         [ QBStructHeader
         , QBStructItemString830000 "prefix" "download"
-        , QBStructItemInteger810000 2923132203 1
-        , QBStructItemStruct8A0000 1902830817
+        , QBStructItemInteger810000 "num_tiers" 1
+        , QBStructItemStruct8A0000 "tier1"
           [ QBStructHeader
           , QBStructItemStringW "title" $ case lang of
             GH3English -> "Downloaded songs"
@@ -195,8 +203,12 @@ buildGH3TextSet prefs dlName lang paks = let
             GH3Italian -> "Canzoni scaricate"
             GH3Spanish -> "Temas descargados"
           , QBStructItemArray8C0000 "songs" $ QBArrayOfQbKey allSongIDs
-          , QBStructItemQbKey8D0000 0 637243660
-          , QBStructItemQbKey8D0000 "level" 1568516040
+          , if isAerosmith
+            then QBStructItemInteger810000 "defaultunlocked" 4
+            else QBStructItemQbKey8D0000 0 "unlockall"
+          , QBStructItemQbKey8D0000 "level" $ if isAerosmith
+            then "load_z_Nipmuc"
+            else "load_z_artdeco"
           ]
         ]
       , QBSectionArray "download_songlist" unk1 $ QBArrayOfQbKey allSongIDs
@@ -224,12 +236,26 @@ buildGH3TextSet prefs dlName lang paks = let
     Right song -> T.pack (show song.gh3Title) <> " (" <> song.gh3Artist <> ")"
   in (buildPak $ otherNodes <> [metadataQB, end], songsLog)
 
+detectGH3Game :: (SendMessage m) => GH3TextSet -> StackTraceT m GH3Game
+detectGH3Game set = let
+  games = nubOrd $ map (\(_lang, pak) -> pak.gh3Game) set.languages
+  in case games of
+    [Just GuitarHeroAerosmith] -> do
+      lg "Creating cache for Guitar Hero: Aerosmith"
+      return GuitarHeroAerosmith
+    _                          -> if elem (Just GuitarHeroAerosmith) games
+      then fatal "Some but not all provided songs are for Guitar Hero: Aerosmith"
+      else return GuitarHero3
+
 combineGH3SongCache360 :: (SendMessage m, MonadIO m) => [FilePath] -> FilePath -> StackTraceT m ()
 combineGH3SongCache360 ins out = do
   sets <- fmap mconcat $ mapM loadGH3TextSetDLC ins
+  game <- detectGH3Game sets
   let dlText = "dl2000000000"
       dlBytes = B8.pack $ T.unpack dlText
-  mystery <- gh3MysteryScript dlBytes $ snd <$> sets.dlcScript
+  mystery <- gh3MysteryScript dlBytes $ case game of
+    GuitarHero3         -> snd <$> sets.dlcScript
+    GuitarHeroAerosmith -> Just emptyMysteryScript
   prefs <- readPreferences
   let folder = Folder
         { folderSubfolders = []
@@ -249,28 +275,39 @@ combineGH3SongCache360 ins out = do
   forM_ engLog $ \line -> lg $ "- " <> T.unpack line
   thumb <- liftIO $ gh3Thumbnail >>= B.readFile
   liftIO $ makeCONMemory CreateOptions
-    { createNames = replicate 6 "GH3 Customs Database"
+    { createNames = replicate 6 $ case game of
+      GuitarHero3         -> "GH3 Customs Database"
+      GuitarHeroAerosmith -> "GHA Customs Database"
     , createDescriptions = []
-    , createTitleID = 0x415607F7
-    , createTitleName = "Guitar Hero 3"
-    , createThumb = thumb
-    , createTitleThumb = thumb
-    , createLicenses = [LicenseEntry (-1) 1 1, LicenseEntry (-1) 1 0]
+    , createTitleID = case game of
+      GuitarHero3         -> 0x415607F7
+      GuitarHeroAerosmith -> 0x41560819
+    , createTitleName = case game of
+      GuitarHero3         -> "Guitar Hero 3"
+      GuitarHeroAerosmith -> "Guitar Hero Aerosmith"
+    , createThumb         = thumb
+    , createTitleThumb    = thumb
+    , createLicenses      = [LicenseEntry (-1) 1 1, LicenseEntry (-1) 1 0]
     , createMediaID       = 0
     , createVersion       = 0
     , createBaseVersion   = 0
     , createTransferFlags = 0xC0
-    , createLIVE = True
+    , createLIVE          = True
     } folder out
 
-combineGH3SongCachePS3Folder :: (SendMessage m, MonadIO m, MonadResource m) => [FilePath] -> StackTraceT m (Folder B.ByteString Readable)
+combineGH3SongCachePS3Folder :: (SendMessage m, MonadIO m, MonadResource m) => [FilePath] -> StackTraceT m (Folder B.ByteString Readable, GH3Game)
 combineGH3SongCachePS3Folder ins = do
   sets <- fmap mconcat $ mapM loadGH3TextSetDLC ins
+  game <- detectGH3Game sets
   let dlText = "dl2000000000"
       dlBytes = B8.pack $ T.unpack dlText
       folderLabel = "CUSTOMS_DATABASE"
-      edatConfig = gh3CustomMidEdatConfig folderLabel
-  mystery <- gh3MysteryScript dlBytes $ snd <$> sets.dlcScript
+      edatConfig = case game of
+        GuitarHero3         -> gh3CustomMidEdatConfig folderLabel
+        GuitarHeroAerosmith -> ghaCustomMidEdatConfig folderLabel
+  mystery <- gh3MysteryScript dlBytes $ case game of
+    GuitarHero3         -> snd <$> sets.dlcScript
+    GuitarHeroAerosmith -> Just emptyMysteryScript
   prefs <- readPreferences
   let files =
         [ (dlText <> ".pak.ps3"       , mystery                     )
@@ -297,16 +334,19 @@ combineGH3SongCachePS3Folder ins = do
       stackIO $ packNPData edatConfig fin' fout' nameBytes
       bs' <- stackIO $ BL.fromStrict <$> B.readFile fout'
       return (nameBytes, makeHandle (T.unpack nameText) $ byteStringSimpleHandle bs')
-  return $ singleFolder folderLabel Folder
+  return (singleFolder folderLabel Folder
     { folderSubfolders = []
     , folderFiles      = edats
-    }
+    }, game)
 
 combineGH3SongCachePS3 :: (SendMessage m, MonadIO m, MonadResource m) => [FilePath] -> FilePath -> StackTraceT m ()
 combineGH3SongCachePS3 ins out = do
+  (folder, game) <- combineGH3SongCachePS3Folder ins
   let folderLabel = "CUSTOMS_DATABASE"
-      edatConfig = gh3CustomMidEdatConfig folderLabel
-  main <- singleFolder "USRDIR" <$> combineGH3SongCachePS3Folder ins
+      edatConfig = case game of
+        GuitarHero3         -> gh3CustomMidEdatConfig folderLabel
+        GuitarHeroAerosmith -> ghaCustomMidEdatConfig folderLabel
+  let main = singleFolder "USRDIR" folder
   extra <- stackIO $ getResourcesPath "pkg-contents/gh3" >>= fmap (first TE.encodeUtf8) . crawlFolder
   stackIO $ makePKG (npdContentID edatConfig) (main <> extra) out
 
@@ -322,26 +362,37 @@ readGH3TextPakQB nodes = let
       ]
     songs
   sortedNodes = flip map nodes $ \pair@(node, bs) -> if node.nodeFileType == ".qb"
-    then let
-      -- this will just be an empty list if we can't parse the qb,
-      -- such as some parts of gh3 disc .pak we don't care about
-      qb = fromMaybe [] $ map (lookupQS mappingQS) <$> runGetM parseQB bs
-      in case getSonglistProps qb of
-        []    -> Left  pair
-        songs -> Right songs
+    -- this will just be an empty list if we can't parse the qb,
+    -- such as some parts of gh3 disc .pak we don't care about
+    then Right (pair, fromMaybe [] $ map (lookupQS mappingQS) <$> runGetM parseQB bs)
     else Left pair
-  structs = concat $ flip map (concat $ rights sortedNodes) $ \case
+  sortedNodes' = flip map sortedNodes $ \case
+    Left pair        -> Left pair
+    Right (pair, qb) -> case getSonglistProps qb of
+      []    -> Left pair
+      songs -> Right songs
+  structs = concat $ flip map (concat $ rights sortedNodes') $ \case
     QBStructItemStruct8A0000 k struct -> [(k, struct)] -- gh3
     QBStructItemStruct       k struct -> [(k, struct)] -- ghwt
     _                                 -> []
     -- known other things found here:
     -- QBStructItemQbKeyString9A0000 0 "download_songlist_props"  -- GH3 DEMO BUILD
     -- QBStructItemQbKeyString9A0000 0 "permanent_songlist_props" -- under gh3_songlist_props in final gh3 disc
+  game = listToMaybe $ do
+    Right (_, qb) <- sortedNodes
+    QBSectionStruct "GH3_Download_Songs" _ (QBStructHeader : meta) <- qb
+    QBStructItemStruct8A0000 "tier1" (QBStructHeader : tier) <- meta
+    QBStructItemQbKey8D0000 "level" level <- tier
+    case level of
+      "load_z_artdeco" -> [GuitarHero3]
+      "load_z_Nipmuc"  -> [GuitarHeroAerosmith]
+      _                -> []
   in GH3TextPakQB
     { gh3TextPakSongStructs = structs
     , gh3OtherNodes
       = filter (\(node, _) -> node.nodeFileType /= ".last")
-      $ lefts sortedNodes
+      $ lefts sortedNodes'
+    , gh3Game = game
     }
 
 data GH3Singer
@@ -412,6 +463,15 @@ parseSongInfoGH3 songEntries = do
     _ : _ -> Left "parseSongInfoGH3: unrecognized value for coop-is-rhythm key"
     []    -> Right False
   Right SongInfoGH3{..}
+
+-- use in GH Aerosmith songs
+emptyMysteryScript :: BL.ByteString
+emptyMysteryScript = BL.pack
+  [ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1C
+  , 0x1C, 0x08, 0x02, 0x04, 0x10, 0x04, 0x08, 0x0C
+  , 0x0C, 0x08, 0x02, 0x04, 0x14, 0x02, 0x04, 0x0C
+  , 0x10, 0x10, 0x0C, 0x00
+  ]
 
 -- Unknown contents of "dl<num>.pak.xen"
 gh3MysteryScript :: (MonadIO m) => B.ByteString -> Maybe BL.ByteString -> m BL.ByteString

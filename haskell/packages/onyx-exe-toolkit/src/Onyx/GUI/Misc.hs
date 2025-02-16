@@ -42,7 +42,8 @@ import           Onyx.MIDI.Read                            (mapTrack)
 import qualified Onyx.MIDI.Track.File                      as F
 import           Onyx.MIDI.Track.Lipsync
 import           Onyx.MIDI.Track.Vocal                     (nullVox)
-import           Onyx.Neversoft.GH3.Metadata               (combineGH3SongCache360,
+import           Onyx.Neversoft.GH3.Metadata               (GH3Game (..),
+                                                            combineGH3SongCache360,
                                                             combineGH3SongCachePS3,
                                                             combineGH3SongCachePS3Folder)
 import           Onyx.Preferences
@@ -588,8 +589,11 @@ miscPageGH3SongCache sink rect tab startTasks = do
     defDir <- getDefaultPS3Dir
     stackIO $ askFolder defDir $ \dout -> sink $ EventOnyx $ startTasks $ let
       task = do
-        folder <- combineGH3SongCachePS3Folder inputs
-        stackIO $ installPS3Folder "BLUS30074" (Just "pkg-contents/gh3") (first TE.decodeLatin1 folder) dout
+        (folder, game) <- combineGH3SongCachePS3Folder inputs
+        let gameID = case game of
+              GuitarHero3         -> "BLUS30074"
+              GuitarHeroAerosmith -> "BLUS30133"
+        stackIO $ installPS3Folder gameID (Just "pkg-contents/gh3") (first TE.decodeLatin1 folder) dout
       in [("Install GH3 cache file", task)]
 
 miscPageWoRSongCache

@@ -310,6 +310,11 @@ neversoftIDs =
   , "BLUS30292", "BLES00576" -- GH5
   , "BLUS30164", "BLES00299" -- GHWT
   , "BLUS30074", "BLES00134" -- GH3
+  , "BLUS30133", "BLES00241", "BLJS10030" -- Aerosmith (Addy-enabled DLC)
+  -- haven't seen rest but adding just in case
+  , "BLUS30290", "BLES00549" -- GHSH
+  , "BLUS30257", "BLES00479" -- Metallica
+  , "BLUS30291", "BLES00578" -- Van Halen
   ]
 
 tryDecryptEDAT
