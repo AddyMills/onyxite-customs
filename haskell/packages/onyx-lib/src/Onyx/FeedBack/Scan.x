@@ -29,7 +29,8 @@ tokens :-
   (whole, '.' : part) = break (== '.') s
   wholeRat = fromInteger $ read $ dropWhile (== '+') whole
   partDenom = fromInteger $ 10 ^ length part
-  partRat = fromInteger (read part) / partDenom
+  sign = if elem '-' s then (-1) else 1
+  partRat = sign * (fromInteger (read part) / partDenom)
   in TAtom $ Real $ wholeRat + partRat
   }
 
