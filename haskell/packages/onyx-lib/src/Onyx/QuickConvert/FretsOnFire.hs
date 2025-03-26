@@ -418,6 +418,7 @@ convertEncoreFoF f info = do
   let audioMap =
         [ ("song", "backing")
         , ("guitar", "lead")
+        , ("keys", "keys")
         , ("rhythm", "bass")
         , ("drums", "drums")
         , ("vocals", "vocals")
