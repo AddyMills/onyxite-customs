@@ -144,28 +144,32 @@ loadEncoreInfo f = do
 
 data EncoreFile t = EncoreFile
   { partGuitar    :: EncoreGuitar t
+  , partKeys      :: EncoreGuitar t
   , partBass      :: EncoreGuitar t
   , partDrums     :: EncoreDrums  t
   , partVocals    :: EncorePart   t
-  , plasticGuitar :: FiveTrack      t
-  , plasticBass   :: FiveTrack      t
-  , plasticDrums  :: DrumTrack      t
-  , events        :: EventsTrack    t
-  , beat          :: BeatTrack      t
-  , section       :: SectionTrack   t
+  , plasticGuitar :: FiveTrack    t
+  , plasticKeys   :: FiveTrack    t
+  , plasticBass   :: FiveTrack    t
+  , plasticDrums  :: DrumTrack    t
+  , events        :: EventsTrack  t
+  , beat          :: BeatTrack    t
+  , section       :: SectionTrack t
   } deriving (Show, Generic)
     deriving (Semigroup, Monoid, Mergeable) via GenericMerge (EncoreFile t)
 
 instance ParseFile EncoreFile where
   parseFile = do
-    partGuitar         <- (.partGuitar   ) =. fileTrack ("PART GUITAR"    :| [])
-    partBass           <- (.partBass     ) =. fileTrack ("PART BASS"      :| [])
-    partDrums          <- (.partDrums    ) =. fileTrack ("PART DRUMS"     :| [])
-    partVocals         <- (.partVocals   ) =. fileTrack ("PART VOCALS"    :| [])
-    plasticGuitar      <- (.plasticGuitar) =. fileTrack ("PLASTIC GUITAR" :| [])
-    plasticBass        <- (.plasticBass  ) =. fileTrack ("PLASTIC BASS"   :| [])
-    plasticDrums       <- (.plasticDrums ) =. fileTrack ("PLASTIC DRUMS"  :| [])
-    events             <- (.events       ) =. fileTrack ("EVENTS"         :| [])
-    beat               <- (.beat         ) =. fileTrack ("BEAT"           :| [])
-    section            <- (.section      ) =. fileTrack ("SECTION"        :| [])
+    partGuitar    <- (.partGuitar   ) =. fileTrack ("PART GUITAR"    :| [])
+    partKeys      <- (.partKeys     ) =. fileTrack ("PART KEYS"      :| [])
+    partBass      <- (.partBass     ) =. fileTrack ("PART BASS"      :| [])
+    partDrums     <- (.partDrums    ) =. fileTrack ("PART DRUMS"     :| [])
+    partVocals    <- (.partVocals   ) =. fileTrack ("PART VOCALS"    :| [])
+    plasticGuitar <- (.plasticGuitar) =. fileTrack ("PLASTIC GUITAR" :| [])
+    plasticKeys   <- (.plasticKeys  ) =. fileTrack ("PLASTIC KEYS"   :| [])
+    plasticBass   <- (.plasticBass  ) =. fileTrack ("PLASTIC BASS"   :| [])
+    plasticDrums  <- (.plasticDrums ) =. fileTrack ("PLASTIC DRUMS"  :| [])
+    events        <- (.events       ) =. fileTrack ("EVENTS"         :| [])
+    beat          <- (.beat         ) =. fileTrack ("BEAT"           :| [])
+    section       <- (.section      ) =. fileTrack ("SECTION"        :| [])
     return EncoreFile{..}

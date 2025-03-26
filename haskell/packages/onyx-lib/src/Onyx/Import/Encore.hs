@@ -63,6 +63,8 @@ importEncore dir level = do
   audioDrums   <- stackIO $ audioFor "drums"
   audioBass    <- stackIO $ audioFor "bass"
   audioLead    <- stackIO $ audioFor "lead"
+  audioGuitar  <- stackIO $ audioFor "guitar" -- not seen, adding just in case
+  audioKeys    <- stackIO $ audioFor "keys"
   audioVocals  <- stackIO $ audioFor "vocals"
   audioBacking <- stackIO $ audioFor "backing"
 
@@ -74,7 +76,7 @@ importEncore dir level = do
       return $ guard e >> Just f'
 
   audios <- do
-    let pairs = [audioDrums, audioBass, audioLead, audioVocals, audioBacking] >>= toList >>= toList
+    let pairs = [audioDrums, audioBass, audioLead, audioGuitar, audioKeys, audioVocals, audioBacking] >>= toList >>= toList
     fmap HM.fromList $ forM pairs $ \(f, r) -> do
       chans <- audioChannelsReadable r
       return (T.pack f, AudioFile AudioInfo
@@ -131,11 +133,19 @@ importEncore dir level = do
     , plans = HM.singleton "encore" $ StandardPlan StandardPlanInfo
       { song        = fmap (fmap $ (\(f, _) -> Named $ T.pack f)) audioBacking
       , parts       = Parts $ HM.fromList $ do
+        let (newLead, newGuitar) = case (audioLead, audioGuitar) of
+              -- move lead to guitar if possible
+              (Just _, Nothing) -> (Nothing  , audioLead  )
+              -- otherwise, either no lead track (all good)
+              -- or there's lead and guitar (confusing! move lead to backing)
+              _                 -> (audioLead, audioGuitar)
         (part, audio) <-
-          [ (F.PartDrums , audioDrums )
-          , (F.PartBass  , audioBass  )
-          , (F.PartGuitar, audioLead  )
-          , (F.PartVocal , audioVocals)
+          [ (F.PartDrums      , audioDrums )
+          , (F.PartBass       , audioBass  )
+          , (F.PartGuitar     , newGuitar  )
+          , (F.PartKeys       , audioKeys  )
+          , (F.PartVocal      , audioVocals)
+          , (F.PartName "lead", newLead    )
           ]
         a <- toList audio
         return (part, PartSingle $ fmap (\(f, _) -> Named $ T.pack f) a)
@@ -154,6 +164,10 @@ encoreToOnyxMIDI = fmap $ \encore -> mempty
     [ (F.PartGuitar, mempty
       { F.onyxPartGuitar = encore.plasticGuitar
       , F.onyxPartMania = Map.fromList $ encorePart encore.partGuitar.part
+      })
+    , (F.PartKeys, mempty
+      { F.onyxPartGuitar = encore.plasticKeys
+      , F.onyxPartMania = Map.fromList $ encorePart encore.partKeys.part
       })
     , (F.PartBass, mempty
       { F.onyxPartGuitar = encore.plasticBass
@@ -209,6 +223,22 @@ encorePartData diffs mid = let
       , mania = do
         tier <- getTier ["gr", "guitar"]
         importPadMania tier mid.tracks.partGuitar.part
+      , ..
+      })
+    , (F.PartKeys, let Part{..} = emptyPart in Part
+      { grybo = do
+        tier <- getTier ["pk", "plastic_keys"] -- pk not seen but just in case
+        Just ModeFive
+          { difficulty = tier
+          , hopoThreshold = 170
+          , fixFreeform = False
+          , smoothFrets = False
+          , sustainGap = 60
+          , detectMutedOpens = True
+          }
+      , mania = do
+        tier <- getTier ["keys"]
+        importPadMania tier mid.tracks.partKeys.part
       , ..
       })
     , (F.PartBass, let Part{..} = emptyPart in Part
