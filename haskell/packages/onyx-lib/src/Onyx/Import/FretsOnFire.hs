@@ -112,6 +112,15 @@ generateSwells notes = let
   laneType typ = fmap snd $ RTB.filter ((== typ) . fst) result
   in (laneType LaneSingle, laneType LaneDouble)
 
+extendTomsFile
+  :: F.Song (F.FixedFile U.Beats)
+  -> F.Song (F.FixedFile U.Beats)
+extendTomsFile (F.Song tmap mmap ps) = F.Song tmap mmap ps
+  { F.fixedPartDrums       = extendShortTomMarkers (1/8) ps.fixedPartDrums
+  , F.fixedPartDrums2x     = extendShortTomMarkers (1/8) ps.fixedPartDrums2x
+  , F.fixedPartRealDrumsPS = extendShortTomMarkers (1/8) ps.fixedPartRealDrumsPS
+  }
+
 -- | Uses the PS swell lanes as a guide to make new valid ones.
 redoSwells
   :: F.Song (F.FixedFile U.Beats)
@@ -405,7 +414,7 @@ importFoF src dir level = do
           x                               -> x
         }
 
-  outputMIDI <- fixShortVoxPhrases $ checkEnableDynamics $ redoSwells parsed
+  outputMIDI <- fixShortVoxPhrases $ checkEnableDynamics $ extendTomsFile $ redoSwells parsed
     { F.tracks = fixGHVox $ swapFiveLane $ removeDummyTracks $ add2x parsed.tracks
     }
   let outputFixed = outputMIDI.tracks

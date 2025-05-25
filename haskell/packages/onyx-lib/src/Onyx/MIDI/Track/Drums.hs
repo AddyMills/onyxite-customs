@@ -18,11 +18,13 @@ module Onyx.MIDI.Track.Drums where
 
 import           Control.Monad                    (guard, void, (>=>))
 import           Control.Monad.Codec
+import qualified Data.EventList.Absolute.TimeBody as ATB
 import qualified Data.EventList.Relative.TimeBody as RTB
 import           Data.Foldable                    (toList)
 import qualified Data.Map                         as Map
 import           Data.Maybe                       (fromMaybe, mapMaybe)
 import           Data.Profunctor                  (dimap)
+import qualified Data.Set                         as Set
 import qualified Data.Text                        as T
 import           GHC.Generics                     (Generic)
 import qualified Numeric.NonNegative.Class        as NNC
@@ -557,3 +559,41 @@ setDrumMix audio trk = let
       in if alreadyMixed then mixSet else RTB.cons NNC.zero (audio, NoDisco) mixSet
     }
   in trk { drumDifficulties = fmap f trk.drumDifficulties }
+
+-- Extends tom markers to a minimum length, or up to the next marker of that
+-- color, or the next note (any note on any difficulty).
+extendShortTomMarkers :: (NNC.C t, Num t) => t -> DrumTrack t -> DrumTrack t
+extendShortTomMarkers minLength trk = let
+  notes = Set.fromList $ do
+    diff <- Map.elems trk.drumDifficulties
+    ATB.getTimes $ RTB.toAbsoluteEventList NNC.zero diff.drumGems
+  markers
+    = RTB.toAbsoluteEventList NNC.zero
+    $ joinEdgesSimple
+    $ fmap (\case (color, Tom) -> EdgeOn () color; (color, Cymbal) -> EdgeOff color)
+    $ trk.drumToms
+  newMarkers color = let
+    oldMarkers = ATB.mapMaybe (\((), color', len) -> guard (color == color') >> Just len) markers
+    in output color $ extend oldMarkers
+  extend = \case
+    At t len rest -> let
+      currentEnd = t <> len
+      lengthToNextNote = case Set.lookupGE currentEnd notes of
+        Nothing       -> minLength
+        Just noteTime -> noteTime - t
+      lengthToNextMarker = case rest of
+        ANil            -> minLength
+        At nextTime _ _ -> nextTime - t
+      newLen = if len >= minLength
+        then len
+        else min minLength $ min lengthToNextNote lengthToNextMarker
+      in At t newLen $ extend rest
+    ANil -> ANil
+  output color atb
+    = fmap (\case EdgeOn () c -> (c, Tom); EdgeOff c -> (c, Cymbal))
+    $ splitEdgesSimple
+    $ RTB.fromAbsoluteEventList
+    $ fmap (\len -> ((), color, len)) atb
+  in trk
+    { drumToms = RTB.merge (newMarkers Yellow) $ RTB.merge (newMarkers Blue) (newMarkers Green)
+    }
