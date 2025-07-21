@@ -1,26 +1,29 @@
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 module Onyx.PowerGig.Songs where
 
-import           Codec.Compression.GZip     (decompress)
-import           Control.Monad              (void)
+import qualified Codec.Compression.Zlib.Internal as Z
+import           Control.Exception.Base          (displayException)
+import           Control.Monad                   (void)
 import           Control.Monad.Codec
-import           Control.Monad.IO.Class     (MonadIO)
+import           Control.Monad.IO.Class          (MonadIO)
+import           Control.Monad.ST.Lazy           (runST)
 import           Control.Monad.Trans.Reader
-import qualified Data.ByteString            as B
-import qualified Data.ByteString.Lazy       as BL
-import           Data.Fixed                 (Milli)
-import           Data.Foldable              (toList)
-import           Data.Functor.Identity      (Identity)
-import           Data.List.NonEmpty         (NonEmpty (..))
-import qualified Data.Text                  as T
-import qualified Data.Text.Encoding         as TE
-import qualified Data.Vector                as V
+import qualified Data.ByteString                 as B
+import qualified Data.ByteString.Lazy            as BL
+import           Data.Fixed                      (Milli)
+import           Data.Foldable                   (toList)
+import           Data.Functor.Identity           (Identity)
+import           Data.List.NonEmpty              (NonEmpty (..))
+import qualified Data.Text                       as T
+import qualified Data.Text.Encoding              as TE
+import qualified Data.Vector                     as V
 import           Onyx.Codec.XML
-import           Onyx.Rocksmith.CST         (cstSpaceW3)
+import           Onyx.Rocksmith.CST              (cstSpaceW3)
 import           Onyx.StackTrace
 import           Onyx.Util.Handle
-import           Text.XML.Light             (parseXMLDoc, ppTopElement)
+import           Text.XML.Light                  (parseXMLDoc, ppTopElement)
 
 loadDiscSongKeys :: Folder T.Text Readable -> IO [T.Text]
 loadDiscSongKeys dir = case findFile ("Scripting" :| ["Songs.lua"]) dir of
@@ -49,7 +52,7 @@ loadSongXML k dir = inside ("Loading PowerGig song XML for: " <> show k) $ do
           -- find start of gzip file. seems to vary (16 in Tornado, 18 in most PS3 disc, 20 in PS3 The Devil Cried)
           gzipMagic = BL.pack [0x1F, 0x8B]
           loop trimming = if gzipMagic `BL.isPrefixOf` trimming
-            then return $ decompress trimming
+            then either fatal return $ gunzipPowerGig trimming
             else if BL.null trimming
               then fatal $ "Couldn't find where to gzip-decompress " <> T.unpack k <> ".xml file"
               else loop $ BL.drop 1 trimming
@@ -57,6 +60,19 @@ loadSongXML k dir = inside ("Loading PowerGig song XML for: " <> show k) $ do
         else return bs
       elt <- maybe (fatal "Couldn't parse XML") return $ parseXMLDoc $ TE.decodeUtf8 $ BL.toStrict xml
       mapStackTraceT (`runReaderT` elt) $ codecIn $ isTag "song" $ parseInside' insideCodec
+
+gunzipPowerGig :: BL.ByteString -> Either String BL.ByteString
+gunzipPowerGig bs = runST $ let
+  go input = \case
+    Z.DecompressInputRequired f             -> case input of
+      []     -> f B.empty >>= go []
+      x : xs -> f x       >>= go xs
+    Z.DecompressOutputAvailable out getNext -> do
+      next <- getNext
+      fmap (BL.fromStrict out <>) <$> go input next
+    Z.DecompressStreamEnd unread            -> return $ Right $ BL.fromStrict unread -- this is needed for the lost Beer, there's uncompressed data at the end
+    Z.DecompressStreamError err             -> return $ Left $ displayException err
+  in go (BL.toChunks bs) $ Z.decompressST Z.gzipFormat Z.defaultDecompressParams
 
 showSongXML :: Song -> B.ByteString
 showSongXML song = let

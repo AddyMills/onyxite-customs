@@ -294,21 +294,24 @@ importPowerGigSong key song folder level = do
   combinedAudio <- case audio_combined_audio $ song_audio song of
     Nothing -> fatal "No combined_audio in XML"
     Just ca -> return ca
-  streamCount <- case quotRem (ca_num_channels combinedAudio) 2 of
-    (n, 0) -> return n
-    _      -> fatal $ "Expected an even num_channels for combined_audio, but found " <> show (ca_num_channels combinedAudio)
+  (streamCount, endsWithMono) <- case quotRem (ca_num_channels combinedAudio) 2 of
+    (n, 0) -> return (n    , False)
+    (n, _) -> return (n + 1, True ) -- only seen so far in The Impression That I Get
   let xboxAudio = ca_xbox360_file combinedAudio >>= T.stripSuffix ".e.2"
       ps3Audio  = T.stripSuffix ".e.2" (ca_file combinedAudio)
+      channelCounts = map
+        (\i -> if endsWithMono && i >= streamCount - 1 then 1 else 2)
+        [0 .. streamCount - 1]
       useXboxAudio rate samples packetsPerBlock xmas = do
-        xmaBytes <- stackIO $ makeXMA2s $ flip map xmas $ \xma -> XMA2Contents
-          { xma2Channels        = 2
+        xmaBytes <- stackIO $ makeXMA2s $ flip map (zip channelCounts xmas) $ \(channels, xma) -> XMA2Contents
+          { xma2Channels        = channels
           , xma2Rate            = rate
           , xma2Samples         = samples
           , xma2PacketsPerBlock = packetsPerBlock
           , xma2SeekTable       = Nothing
           , xma2Data            = writeXMA2Packets xma
           }
-        return $ flip map (zip [0..] xmaBytes) $ \(i, bs) -> let
+        return $ flip map (zip [0..] $ zip channelCounts xmaBytes) $ \(i, (channels, bs)) -> let
           name = "stream-" <> show (i :: Int)
           filename = name <> ".xma"
           afile = AudioFile AudioInfo
@@ -318,7 +321,7 @@ importPowerGigSong key song folder level = do
               $ makeHandle filename $ byteStringSimpleHandle bs
             , commands = []
             , rate = Nothing
-            , channels = 2
+            , channels = channels
             }
           in (T.pack name, afile)
   audio <- case level of
@@ -334,7 +337,7 @@ importPowerGigSong key song folder level = do
         Just r -> do
           -- These should always be MP3 inside, but we'll just use the generic split function
           streams <- stackIO $ useHandle r handleToByteString >>= parseFSB >>= splitFSBStreams
-          forM (zip [0..] streams) $ \(i, stream) -> do
+          forM (zip [0..] $ zip channelCounts streams) $ \(i, (channels, stream)) -> do
             (streamData, ext) <- stackIO $ getFSBStreamBytes stream
             let name = "stream-" <> show (i :: Int)
                 filename = name <> "." <> T.unpack ext
@@ -345,7 +348,7 @@ importPowerGigSong key song folder level = do
                     $ makeHandle filename $ byteStringSimpleHandle streamData
                   , commands = []
                   , rate = Nothing
-                  , channels = 2
+                  , channels = channels
                   }
             return (T.pack name, afile)
         Nothing -> fatal "Couldn't find either Xbox 360 or PS3 format audio"
