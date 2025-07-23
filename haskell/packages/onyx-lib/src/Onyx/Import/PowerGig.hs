@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE PatternSynonyms       #-}
 {-# LANGUAGE TupleSections         #-}
@@ -18,7 +19,8 @@ import           Data.Foldable                     (toList)
 import qualified Data.HashMap.Strict               as HM
 import           Data.List.NonEmpty                (NonEmpty (..), nonEmpty)
 import qualified Data.Map                          as Map
-import           Data.Maybe                        (catMaybes, isJust,
+import           Data.Maybe                        (catMaybes, fromMaybe,
+                                                    isJust, isNothing,
                                                     listToMaybe)
 import qualified Data.Set                          as Set
 import qualified Data.Text                         as T
@@ -40,8 +42,9 @@ import           Onyx.Audio.FSB                    (XMA2Contents (..),
 import           Onyx.Guitar
 import           Onyx.Harmonix.DTA.Serialize.Magma (Gender (..))
 import           Onyx.Import.Base
-import           Onyx.MIDI.Common                  (Difficulty (..),
+import           Onyx.MIDI.Common                  (Difficulty (..), Edge (..),
                                                     StrumHOPOTap (..),
+                                                    edgeBlips_, joinEdgesSimple,
                                                     pattern RNil, pattern Wait)
 import qualified Onyx.MIDI.Track.Drums             as D
 import qualified Onyx.MIDI.Track.File              as F
@@ -52,6 +55,7 @@ import           Onyx.MIDI.Track.Vocal             (Lyric (..), LyricNote (..),
                                                     putLyricNotes)
 import           Onyx.PowerGig.Crypt
 import           Onyx.PowerGig.GEV
+import           Onyx.PowerGig.MIDI
 import           Onyx.PowerGig.Songs
 import           Onyx.Project
 import           Onyx.StackTrace
@@ -81,7 +85,8 @@ importPowerGig sourceDir base = do
 importPowerGigSong :: (SendMessage m, MonadIO m) => T.Text -> Song -> Folder T.Text Readable -> Import m
 importPowerGigSong key song folder level = do
 
-  -- we need to read .gev, since .mid are not present in PS3 version at all
+  -- we default to reading .gev, since .mid are not present in PS3 version at all.
+  -- .gev are usually present, except the leaked weezer pack doesn't have them
   maybeGEV <- case level of
     ImportQuick -> return Nothing
     ImportFull -> do
@@ -91,15 +96,19 @@ importPowerGigSong key song folder level = do
       case findFileCI gevPath folder of
         Nothing -> return Nothing
         Just r  -> fmap Just $ stackIO (useHandle r handleToByteString) >>= runGetM readGEV
-  -- TODO also load midi, so we can read from weird unreleased "LargePackTest" and also get time sigs on 360 at least
-  -- maybeMid <- case level of
-  --   ImportQuick -> return Nothing
-  --   ImportFull -> case findFileCI ("Audio" :| ["songs", key, audio_midi $ song_audio song]) folder of
-  --     Nothing -> return Nothing
-  --     Just r  -> fmap Just $ F.loadRawMIDIReadable r >>= F.readMIDIFile' . fixLateTrackNames
-  -- TODO maybe just warn if level is ImportFull and there's no gev or midi found
+  maybeMid <- case level of
+    ImportFull | isNothing maybeGEV -> case findFileCI ("Audio" :| ["songs", key, audio_midi $ song_audio song]) folder of
+      Nothing -> return Nothing
+      Just r  -> fmap Just $ F.loadRawMIDIReadable r >>= F.readMIDIFile' . fixLateTrackNames
+    _ -> return Nothing
+  case (maybeGEV, maybeMid, level) of
+    (Nothing, Nothing, ImportFull) -> warn "No GEV or MIDI file found, charts will be empty!"
+    (Nothing, Just _ , _         ) -> lg "Loading charts from MIDI because no GEV file was found."
+    _                              -> return ()
+  let _ = maybeMid :: Maybe (F.Song (PGFile U.Beats))
+      mid = fromMaybe emptyChart maybeMid
 
-  let tempo = maybe (U.makeTempoMap RTB.empty) getMIDITempos maybeGEV
+  let tempo = maybe mid.tempos getMIDITempos maybeGEV
       gevTracks = Map.fromList $ do
         gev <- toList maybeGEV
         gels <- V.toList $ gelhGELS $ gevGELH gev
@@ -148,6 +157,20 @@ importPowerGigSong key song folder level = do
           let isMojo = maybe False snd $ Map.lookupLE phraseStart mojoEdges
           return (phraseStart, (phraseEnd - phraseStart, isMojo))
 
+      joinVocalsNotesLyrics notes lyrics = RTB.mapMaybe
+        (\xs -> case [note | Left note <- xs] of
+          [] -> Nothing
+          note : _ -> let
+            mlyric = case [lyr | Right lyr <- xs] of
+              []      -> Nothing -- some continuation notes don't have * lyric
+              lyr : _ -> lyr
+            in case (note, mlyric) of
+              ((sustain, Just pitch), Just lyric) -> Just (Pitched pitch lyric, sustain)
+              ((sustain, Just pitch), Nothing) -> Just (SlideTo pitch, sustain)
+              ((sustain, Nothing), Just lyric) -> Just (Talky TalkyNormal lyric, sustain)
+              ((_sustain, Nothing), Nothing) -> Nothing -- TODO warn
+        ) $ RTB.collectCoincident $ RTB.merge (fmap Left notes) (fmap Right lyrics)
+
       getVocalsGEV trackName = case Map.lookup trackName gevTracks of
         Nothing -> return mempty
         Just trk -> let
@@ -170,19 +193,7 @@ importPowerGigSong key song folder level = do
                   "*" -> Nothing
                   s   -> Just s
             return (secsToBeats $ gevtTime evt, maybeLyric)
-          lyricNotes = RTB.mapMaybe
-            (\xs -> case [note | Left note <- xs] of
-              [] -> Nothing
-              note : _ -> let
-                mlyric = case [lyr | Right lyr <- xs] of
-                  []      -> Nothing -- some continuation notes don't have * lyric
-                  lyr : _ -> lyr
-                in case (note, mlyric) of
-                  ((sustain, Just pitch), Just lyric) -> Just (Pitched pitch lyric, sustain)
-                  ((sustain, Just pitch), Nothing) -> Just (SlideTo pitch, sustain)
-                  ((sustain, Nothing), Just lyric) -> Just (Talky TalkyNormal lyric, sustain)
-                  ((_sustain, Nothing), Nothing) -> Nothing -- TODO warn
-            ) $ RTB.collectCoincident $ RTB.merge (fmap Left notes) (fmap Right lyrics)
+          lyricNotes = joinVocalsNotesLyrics notes lyrics
           phraseEnds = RTB.fromAbsoluteEventList $ ATB.fromPairList $ do
             gev <- toList maybeGEV
             evt <- V.toList $ gelsGEVT trk
@@ -201,33 +212,71 @@ importPowerGigSong key song folder level = do
             }
           in return finalTrack
 
-  vox <- getVocalsGEV "vocals_1_expert"
+      getVocalsMIDI :: (Monad m) => (PGFile U.Beats -> VocalDifficulty U.Beats) -> m (VocalTrack U.Beats)
+      getVocalsMIDI f = let
+        pg = f mid.tracks
+        notesPitched
+          = fmap (\((), p, len) -> (len, Just p))
+          $ joinEdgesSimple
+          $ fmap (\(p, b) -> if b then EdgeOn () p else EdgeOff p) pg.vocalNotes
+        notesTalky
+          = fmap (\((), (), len) -> (len, Nothing))
+          $ joinEdgesSimple
+          $ fmap (\b -> if b then EdgeOn () () else EdgeOff ()) pg.vocalTalkies
+        notes
+          = fmap snd
+          $ RTB.filter (not . fst)
+          $ applyStatus1 False pg.vocalFreestyle
+          $ RTB.merge notesPitched notesTalky
+        lyrics = glueLyrics pg.vocalGlue $ flip fmap pg.vocalLyrics $ \str ->
+          case T.strip str of -- lyrics have a space after them for some reason
+            "*" -> Nothing
+            s   -> Just s
+        lyricNotes = joinVocalsNotesLyrics notes lyrics
+        phraseEnds = pg.vocalPhraseEnd
+        phrases = drawPhrases lyricNotes phraseEnds
+          $ RTB.merge pg.vocalMojoGuitarist pg.vocalMojoDrummer
+        phraselessTrack = putLyricNotes lyricNotes
+        finalTrack = phraselessTrack
+          { vocalPhrase1 = U.trackJoin $ flip fmap phrases
+            $ \(len, _mojo) -> Wait 0 True $ Wait len False RNil
+          , vocalOverdrive = U.trackJoin $ flip fmap phrases $ \case
+            (_  , False) -> RNil
+            (len, True ) -> Wait 0 True $ Wait len False RNil
+          }
+        in return finalTrack
+
+  vox <- if isJust maybeGEV then getVocalsGEV "vocals_1_expert" else getVocalsMIDI pgVocalsExpert
 
   let onyxFile = mempty
         { F.onyxParts = Map.fromList
           [ (F.PartGuitar, mempty
             { F.onyxPartGuitar = mempty
               { Five.fiveDifficulties = Map.fromList
-                [ (Easy  , getGuitarGEV "guitar_1_easy"  )
-                , (Medium, getGuitarGEV "guitar_1_medium")
-                , (Hard  , getGuitarGEV "guitar_1_hard"  )
-                , (Expert, getGuitarGEV "guitar_1_expert")
+                [ (Easy  , if isJust maybeGEV then getGuitarGEV "guitar_1_easy"   else getGuitarMIDI pd_easy   pgGuitarEasy  )
+                , (Medium, if isJust maybeGEV then getGuitarGEV "guitar_1_medium" else getGuitarMIDI pd_medium pgGuitarMedium)
+                , (Hard  , if isJust maybeGEV then getGuitarGEV "guitar_1_hard"   else getGuitarMIDI pd_hard   pgGuitarHard  )
+                , (Expert, if isJust maybeGEV then getGuitarGEV "guitar_1_expert" else getGuitarMIDI pd_expert pgGuitarExpert)
                 ]
               , Five.fiveOverdrive = case Map.lookup "guitar_1_expert" gevTracks of
-                Nothing  -> RTB.empty
+                Nothing  -> RTB.merge
+                  (guitarMojoDrummer  $ pgGuitarExpert mid.tracks)
+                  (guitarMojoVocalist $ pgGuitarExpert mid.tracks)
                 Just trk -> RTB.merge (getController 81 trk) (getController 82 trk)
               }
             })
           , (F.PartDrums, mempty
             { F.onyxPartDrums = mempty
               { D.drumDifficulties = Map.fromList
-                [ (Easy  , getDrumsGEV "drums_1_easy"  )
-                , (Medium, getDrumsGEV "drums_1_medium")
-                , (Hard  , getDrumsGEV "drums_1_hard"  )
-                , (Expert, getDrumsGEV "drums_1_expert")
+                [ (Easy  , if isJust maybeGEV then getDrumsGEV "drums_1_easy"   else getDrumsMIDI pgDrumsEasy  )
+                , (Medium, if isJust maybeGEV then getDrumsGEV "drums_1_medium" else getDrumsMIDI pgDrumsMedium)
+                , (Hard  , if isJust maybeGEV then getDrumsGEV "drums_1_hard"   else getDrumsMIDI pgDrumsHard  )
+                , (Expert, if isJust maybeGEV then getDrumsGEV "drums_1_expert" else getDrumsMIDI pgDrumsExpert)
                 ]
               , D.drumOverdrive = case Map.lookup "drums_1_expert" gevTracks of
-                Nothing  -> RTB.empty
+                Nothing  -> RTB.merge
+                  (drumMojoGuitarist $ pgDrumsExpert mid.tracks)
+                  (drumMojoVocalist  $ pgDrumsExpert mid.tracks)
                 Just trk -> RTB.merge (getController 80 trk) (getController 82 trk)
               }
             })
@@ -282,6 +331,22 @@ importPowerGigSong key song folder level = do
             return (start, (color, sustain))
           in fmap (\(hopo, (color, sustain)) -> ((color, if hopo then HOPO else Strum), sustain))
             $ applyStatus1 False hopos notes
+
+      getDrumsMIDI f = let
+        pg = f mid.tracks
+        in mempty
+          -- TODO handle lanes
+          { D.drumGems = flip RTB.mapMaybe (drumGems pg) $ \case
+            EdgeOn () gem -> Just (gem, D.VelocityNormal)
+            EdgeOff _     -> Nothing
+          }
+      getGuitarMIDI getSustDiff getMIDIDiff = let
+        pg = getMIDIDiff mid.tracks
+        minLen = case inst_sustain_threshold (audio_guitar $ song_audio song) >>= getSustDiff of
+          Just ticks -> fromIntegral ticks / 960
+          Nothing    -> 1 -- TODO figure out what it actually is
+        in emitGuitar5 $ fmap (\(hopo, (color, mlen)) -> ((color, if hopo then HOPO else Strum), mlen))
+          $ applyStatus1 False (guitarHOPO pg) $ edgeBlips_ minLen $ guitarGems pg
 
       onyxMid = F.Song
         { F.tempos     = tempo
