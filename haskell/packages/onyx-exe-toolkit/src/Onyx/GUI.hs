@@ -3376,7 +3376,8 @@ previewGroup sink rect getSong getTime getSpeed = do
           h <- FL.pixelH wind
           let flatTrks = concat trks
           RGGraphics.drawTracks stuff (RGGraphics.WindowDims w h) t speed bg (prefEliteLayout ?preferences)
-            $ mapMaybe (`lookup` flatTrks) selected
+            $ flip mapMaybe selected
+            $ \name -> (name,) <$> lookup name flatTrks
   -- TODO add an option to use `FLTK.setUseHighResGL True`
   -- This appears to always be forced true on hidpi Linux. Not sure of Windows.
   -- But on Mac by default I believe the GL resolution is non-retina unless you set this.

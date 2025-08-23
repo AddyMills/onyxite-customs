@@ -14,6 +14,18 @@ plans:
       mix:
       - countin
       - pad: [2.748, youtube]
+  dev:
+    song:
+      pad: [2.748, youtube]
+    parts:
+      bass:
+        pad: [2.748, channels: [[0, 1], stems]]
+      drums:
+        pad: [2.748, channels: [[2, 3], stems]]
+      vocal:
+        pad: [2.748, channels: [[4, 5], stems]]
+      other:
+        pad: [2.748, channels: [[6, 7], stems]]
 audio:
   youtube:
     file-path: audio-youtube.wav
@@ -25,16 +37,28 @@ audio:
     file-path: ../../../sound/hihat-foot.wav
   countin:
     samples: {}
+  stems:
+    file-path: audio-stems.wav
+    commands:
+    - ../../../scripts/stems AUDIO(youtube) audio-stems.wav
+    channels: 8
 parts:
   drums:
     drums:
       kicks: both
       difficulty: 7
+  bass:
+    pro-guitar:
+      tuning:
+        base: bass-6
 targets:
   rb3:
     game: rb3
+    plan: album
   rb3-2x:
     game: rb3
     2x-bass-pedal: true
+    plan: album
   ps:
     game: ps
+    plan: album

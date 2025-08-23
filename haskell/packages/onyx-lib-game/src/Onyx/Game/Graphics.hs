@@ -2535,7 +2535,7 @@ splitSpace n heightWidthRatio (WindowDims w h) = let
     in thisRow ++ makeRows (spaces - cols) rows
   in makeRows n $ reverse $ pieces bestRows h
 
-setUpTrackView :: GLStuff -> WindowDims -> IO ()
+setUpTrackView :: GLStuff -> WindowDims -> IO (M44 Float)
 setUpTrackView GLStuff{..} (WindowDims w h) = do
   glClear GL_DEPTH_BUFFER_BIT
   glUseProgram objectShader
@@ -2554,6 +2554,7 @@ setUpTrackView GLStuff{..} (WindowDims w h) = do
   sendUniformName objectShader "view" view
   sendUniformName objectShader "projection" projection
   sendUniformName objectShader "viewPos" viewPosn
+  return $ projection !*! view
 
 drawDrumPlayFull
   :: GLStuff
@@ -2570,7 +2571,7 @@ drawDrumPlayFull glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed 
   glClear GL_COLOR_BUFFER_BIT
 
   glDepthFunc GL_LESS
-  setUpTrackView glStuff dims
+  void $ setUpTrackView glStuff dims
   drawEliteDrumPlay glStuff time speed layout dps
 
   glDepthFunc GL_ALWAYS
@@ -2596,7 +2597,7 @@ drawFivePlayFull glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed 
   glClear GL_COLOR_BUFFER_BIT
 
   glDepthFunc GL_LESS
-  setUpTrackView glStuff dims
+  void $ setUpTrackView glStuff dims
   drawFivePlay glStuff time speed gps
 
   glDepthFunc GL_ALWAYS
@@ -2685,7 +2686,7 @@ drawTracks
   -> Double
   -> (Maybe PreviewBG)
   -> [EliteDrumLayoutHint]
-  -> [PreviewTrack]
+  -> [(T.Text, PreviewTrack)]
   -> IO ()
 drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg userLayout trks = do
   glBindFramebuffer GL_FRAMEBUFFER 0
@@ -2750,7 +2751,7 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
           gfxConfig.view.height_width_ratio
           dims
 
-  forM_ (zip spaces trks) $ \((x, y, w, h), trk) -> checkGL "draw" $ do
+  mvps <- forM (zip spaces trks) $ \((x, y, w, h), (_name, trk)) -> checkGL "draw" $ do
     glBindFramebuffer GL_FRAMEBUFFER $ case framebuffers of
       SimpleFramebuffer{..} -> simpleFBO
       MSAAFramebuffers{..}  -> msaaFBO
@@ -2759,13 +2760,13 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
     glViewport 0 0 (fromIntegral w) (fromIntegral h)
     glClearColor 0 0 0 0
     glClear GL_COLOR_BUFFER_BIT
-    setUpTrackView glStuff (WindowDims w h)
+    mvp <- setUpTrackView glStuff (WindowDims w h)
     case trk of
-      PreviewDrums        mode m -> drawDrums     glStuff time speed mode                   m
+      PreviewDrums        mode m -> drawDrums      glStuff time speed mode                   m
       PreviewDrumsElite layout m -> drawEliteDrums glStuff time speed (userLayout <> layout) m
-      PreviewFive              m -> drawFive      glStuff time speed                        m
-      PreviewPG              t m -> drawPG        glStuff time speed t                      m
-      PreviewMania           p m -> drawMania     glStuff time speed p                      m
+      PreviewFive              m -> drawFive       glStuff time speed                        m
+      PreviewPG              t m -> drawPG         glStuff time speed t                      m
+      PreviewMania           p m -> drawMania      glStuff time speed p                      m
 
     case framebuffers of
       SimpleFramebuffer{..} -> do
@@ -2788,6 +2789,32 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
         glClear GL_DEPTH_BUFFER_BIT
         glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
         drawTextureFade glStuff dims (Texture intermediateFBOTex w h) (V2 x y) 1
+
+    return mvp
+
+  glDepthFunc GL_ALWAYS -- turn off z to draw track labels
+
+  glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
+  forM_ (zip3 spaces trks mvps) $ \((x, y, w, h), (name, _trk), mvp) -> checkGL "draw track label" $ do
+    texLine <- prepareText glStuff name
+
+    -- use view/projection matrix to get pixel position of the closer edge of the strikeline
+    let V4 _ nowY _ nowW = mvp L.!* V4 0 gfxConfig.track.y gfxConfig.track.targets.z_past 1
+        ndcY             = nowY / nowW
+        strikeY          = round $ (ndcY + 1) * 0.5 * fromIntegral h :: Int
+
+        lineWidth = fromIntegral $ sum (map (vX . gsrAdvance . fst) texLine) `shiftR` 6 :: Int
+        boxWidth  = 2 * margin + lineWidth
+        boxHeight = 2 * margin + fontSize - 5
+        boxX      = x + quot (w - boxWidth) 2
+        boxY      = y + quot (strikeY - boxHeight) 2
+        textX     = boxX + margin
+        textY     = boxY + margin
+        margin    = round $ 10 * scaleUI
+        fontSize  = round $ 15 * scaleUI
+
+    drawColor glStuff dims (V2 boxX boxY) (V2 boxWidth boxHeight) (V4 0 0 0 0.5)
+    drawTextLine glStuff dims texLine (V2 textX textY)
 
 checkGL :: (MonadIO m) => String -> m a -> m a
 checkGL s f = do
