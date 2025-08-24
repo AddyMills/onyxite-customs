@@ -1691,6 +1691,50 @@ quadIndices =
   , 1, 3, 2 -- second triangle
   ]
 
+data Corner = TL | TR | BL | BR
+  deriving (Eq)
+
+-- https://chatgpt.com/share/68aa8c7b-ae74-8013-86cf-ff2038ccc09d
+makeCorner :: Corner -> Int -> ([CFloat], [GLuint])
+makeCorner corner numArcPoints = (vertices, indices) where
+
+  -- center position and angle range
+  -- (fixed these from chatgpt)
+  (cx, cy, start, end) = case corner of
+    TL -> ( 1, -1,   pi/2,   pi  )
+    TR -> (-1, -1,    0  ,   pi/2)
+    BR -> (-1,  1, 3*pi/2, 2*pi  )
+    BL -> ( 1,  1,   pi  , 3*pi/2)
+
+  r = 2 :: CFloat  -- radius so arc spans [-1,1] square
+
+  arcAngles =
+    [ start + (end - start) * fromIntegral i / fromIntegral numArcPoints
+    | i <- [0..numArcPoints]
+    ]
+
+  -- arc points
+  arcVerts = concat
+    [ [ cx + r * cos angle
+      , cy + r * sin angle
+      , 0
+      , (cos angle + 1) / 2  -- texcoord u (simple mapping)
+      , (sin angle + 1) / 2  -- texcoord v
+      ]
+    | angle <- arcAngles
+    ]
+
+  -- center vertex
+  centerVert = [cx, cy, 0, 0.5, 0.5]
+
+  vertices = centerVert <> arcVerts
+
+  -- indices for triangle fan
+  indices = concat
+    [ [0, fromIntegral i, fromIntegral (i + 1)]
+    | i <- [1..numArcPoints]
+    ]
+
 translate4 :: (Num a) => V3 a -> M44 a
 translate4 (V3 x y z) = V4
   (V4 1 0 0 x)
@@ -1814,24 +1858,25 @@ data RenderObject = RenderObject
   } deriving (Show)
 
 data GLStuff = GLStuff
-  { objectShader :: GLuint
-  , boxObject    :: RenderObject
-  , flatObject   :: RenderObject
-  , quadShader   :: GLuint
-  , quadObject   :: RenderObject
-  , textures     :: [(TextureID, Texture)]
-  , models       :: [(ModelID, RenderObject)]
-  , gfxConfig    :: C.Config
-  , framebuffers :: Framebuffers
-  , fxaaEnabled  :: Bool
-  , videoBGs     :: Map.Map (VideoInfo FilePath) VideoHandle
-  , imageBGs     :: Map.Map FilePath Texture
-  , fontLib      :: FT_Library
-  , fontFace     :: FT_Face
-  , fontSlot     :: FT_GlyphSlot
-  , fontGlyphs   :: IORef (HM.HashMap Char (FT_GlyphSlotRec, Texture))
-  , previewSong  :: Maybe PreviewSong
-  , scaleUI      :: Float -- TODO allow changing this during runtime
+  { objectShader  :: GLuint
+  , boxObject     :: RenderObject
+  , flatObject    :: RenderObject
+  , quadShader    :: GLuint
+  , quadObject    :: RenderObject
+  , cornerObjects :: [(Corner, RenderObject)]
+  , textures      :: [(TextureID, Texture)]
+  , models        :: [(ModelID, RenderObject)]
+  , gfxConfig     :: C.Config
+  , framebuffers  :: Framebuffers
+  , fxaaEnabled   :: Bool
+  , videoBGs      :: Map.Map (VideoInfo FilePath) VideoHandle
+  , imageBGs      :: Map.Map FilePath Texture
+  , fontLib       :: FT_Library
+  , fontFace      :: FT_Face
+  , fontSlot      :: FT_GlyphSlot
+  , fontGlyphs    :: IORef (HM.HashMap Char (FT_GlyphSlotRec, Texture))
+  , previewSong   :: Maybe PreviewSong
+  , scaleUI       :: Float -- TODO allow changing this during runtime
   }
 
 data VideoHandle = VideoHandle
@@ -2079,35 +2124,45 @@ loadGLStuff scaleUI previewSong = do
     , (GL_FRAGMENT_SHADER, quadFS)
     ]
 
-  quadVAO <- stackIO $ fillPtr $ glGenVertexArrays 1
-  quadVBO <- stackIO $ fillPtr $ glGenBuffers 1
-  quadEBO <- stackIO $ fillPtr $ glGenBuffers 1
+  let load2DShape vertices indices = do
 
-  glBindVertexArray quadVAO
+        vao <- stackIO $ fillPtr $ glGenVertexArrays 1
+        vbo <- stackIO $ fillPtr $ glGenBuffers 1
+        ebo <- stackIO $ fillPtr $ glGenBuffers 1
 
-  glBindBuffer GL_ARRAY_BUFFER quadVBO
-  stackIO $ withArrayBytes quadVertices $ \size p -> do
-    glBufferData GL_ARRAY_BUFFER size (castPtr p) GL_STATIC_DRAW
+        glBindVertexArray vao
 
-  glBindBuffer GL_ELEMENT_ARRAY_BUFFER quadEBO
-  stackIO $ withArrayBytes quadIndices $ \size p -> do
-    glBufferData GL_ELEMENT_ARRAY_BUFFER size (castPtr p) GL_STATIC_DRAW
+        glBindBuffer GL_ARRAY_BUFFER vbo
+        stackIO $ withArrayBytes vertices $ \size p -> do
+          glBufferData GL_ARRAY_BUFFER size (castPtr p) GL_STATIC_DRAW
 
-  glVertexAttribPointer 0 3 GL_FLOAT GL_FALSE
-    (fromIntegral $ 5 * sizeOf (undefined :: CFloat))
-    nullPtr
-  glEnableVertexAttribArray 0
-  glVertexAttribPointer 1 2 GL_FLOAT GL_FALSE
-    (fromIntegral $ 5 * sizeOf (undefined :: CFloat))
-    (intPtrToPtr $ fromIntegral $ 3 * sizeOf (undefined :: CFloat))
-  glEnableVertexAttribArray 1
+        glBindBuffer GL_ELEMENT_ARRAY_BUFFER ebo
+        stackIO $ withArrayBytes indices $ \size p -> do
+          glBufferData GL_ELEMENT_ARRAY_BUFFER size (castPtr p) GL_STATIC_DRAW
 
-  glUseProgram quadShader
-  sendUniformName quadShader "inTexture" (0 :: GLint)
-  let quadObject = RenderObject quadVAO $ fromIntegral $ length quadIndices
-  glBindVertexArray 0
-  -- see note in loadObject
-  -- stackIO $ withArrayLen [quadVBO, quadEBO] $ glDeleteBuffers . fromIntegral
+        glVertexAttribPointer 0 3 GL_FLOAT GL_FALSE
+          (fromIntegral $ 5 * sizeOf (undefined :: CFloat))
+          nullPtr
+        glEnableVertexAttribArray 0
+        glVertexAttribPointer 1 2 GL_FLOAT GL_FALSE
+          (fromIntegral $ 5 * sizeOf (undefined :: CFloat))
+          (intPtrToPtr $ fromIntegral $ 3 * sizeOf (undefined :: CFloat))
+        glEnableVertexAttribArray 1
+
+        glUseProgram quadShader
+        sendUniformName quadShader "inTexture" (0 :: GLint)
+        let object = RenderObject vao $ fromIntegral $ length indices
+        glBindVertexArray 0
+        -- see note in loadObject
+        -- stackIO $ withArrayLen [vbo, ebo] $ glDeleteBuffers . fromIntegral
+
+        return object
+
+  quadObject <- load2DShape quadVertices quadIndices
+  cornerObjects <- forM [TL, TR, BL, BR] $ \corner -> do
+    let (vertices, indices) = makeCorner corner 16
+    object <- load2DShape vertices indices
+    return (corner, object)
 
   -- textures
 
@@ -2448,10 +2503,10 @@ drawTexture' GLStuff{..} (fadeBottom, fadeTop) (WindowDims screenW screenH) (Tex
   sendUniformName quadShader "isColor" False
   checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES (objVertexCount quadObject) GL_UNSIGNED_INT nullPtr
 
-drawColor :: GLStuff -> WindowDims -> V2 Int -> V2 Int -> V4 Float -> IO ()
-drawColor GLStuff{..} (WindowDims screenW screenH) (V2 x y) (V2 w h) color = do
+drawColor :: GLStuff -> WindowDims -> RenderObject -> V2 Int -> V2 Int -> V4 Float -> IO ()
+drawColor GLStuff{..} (WindowDims screenW screenH) object (V2 x y) (V2 w h) color = do
   glUseProgram quadShader
-  glBindVertexArray $ objVAO quadObject
+  glBindVertexArray $ objVAO object
   let scaleX = fromIntegral w / fromIntegral screenW
       scaleY = fromIntegral h / fromIntegral screenH
       translateX = (fromIntegral x / fromIntegral screenW) * 2 - 1 + scaleX
@@ -2468,7 +2523,53 @@ drawColor GLStuff{..} (WindowDims screenW screenH) (V2 x y) (V2 w h) color = do
   sendUniformName quadShader "endFade" (1 :: Float)
   sendUniformName quadShader "isColor" True
   sendUniformName quadShader "color" color
-  checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES (objVertexCount quadObject) GL_UNSIGNED_INT nullPtr
+  checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES (objVertexCount object) GL_UNSIGNED_INT nullPtr
+
+backgroundBoxRadius :: Int
+backgroundBoxRadius = 10
+
+-- Box with some rounded corners
+drawBackgroundBox :: GLStuff -> WindowDims -> V2 Int -> V2 Int -> V4 Float -> Int -> [Corner] -> IO ()
+drawBackgroundBox glStuff dims (V2 x y) (V2 w h) color radius roundedCorners = do
+  let withCorner :: Corner -> (RenderObject -> IO ()) -> IO ()
+      withCorner corner fn = if elem corner roundedCorners
+        then mapM_ fn $ lookup corner glStuff.cornerObjects
+        else fn glStuff.quadObject
+  -- top left corner
+  withCorner TL $ \object -> drawColor glStuff dims object
+    (V2 x (y + h - radius))
+    (V2 radius radius)
+    color
+  -- top edge
+  drawColor glStuff dims glStuff.quadObject
+    (V2 (x + radius) (y + h - radius))
+    (V2 (w - radius * 2) radius)
+    color
+  -- top right corner
+  withCorner TR $ \object -> drawColor glStuff dims object
+    (V2 (x + w - radius) (y + h - radius))
+    (V2 radius radius)
+    color
+  -- center chunk
+  drawColor glStuff dims glStuff.quadObject
+    (V2 x (y + radius))
+    (V2 w (h - radius * 2))
+    color
+  -- bottom left corner
+  withCorner BL $ \object -> drawColor glStuff dims object
+    (V2 x y)
+    (V2 radius radius)
+    color
+  -- bottom edge
+  drawColor glStuff dims glStuff.quadObject
+    (V2 (x + radius) y)
+    (V2 (w - radius * 2) radius)
+    color
+  -- bottom right corner
+  withCorner BR $ \object -> drawColor glStuff dims object
+    (V2 (x + w - radius) y)
+    (V2 radius radius)
+    color
 
 data BackgroundMode
   = BackgroundFill -- preserve aspect ratio, texture is drawn at least as big as screen (may be clipped)
@@ -2675,7 +2776,13 @@ drawTimeBox glStuff dims@(WindowDims _ hWhole) timeLines = do
       boxHeight = (margin + fontSize) * length texLines + margin
       margin = round $ 10 * scaleUI glStuff
       fontSize = round $ 15 * scaleUI glStuff
-  drawColor glStuff dims (V2 0 $ hWhole - boxHeight) (V2 boxWidth boxHeight) (V4 0 0 0 0.5)
+      backgroundColor = V4 0 0 0 0.5
+  drawBackgroundBox glStuff dims
+    (V2 0 (hWhole - boxHeight))
+    (V2 boxWidth boxHeight)
+    backgroundColor
+    backgroundBoxRadius
+    [BR]
   forM_ (zip [1..] texLines) $ \(i, texLine) -> do
     drawTextLine glStuff dims texLine $ V2 margin $ hWhole - (margin + fontSize) * i
 
@@ -2813,7 +2920,12 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
         margin    = round $ 10 * scaleUI
         fontSize  = round $ 15 * scaleUI
 
-    drawColor glStuff dims (V2 boxX boxY) (V2 boxWidth boxHeight) (V4 0 0 0 0.5)
+    drawBackgroundBox glStuff dims
+      (V2 boxX boxY)
+      (V2 boxWidth boxHeight)
+      (V4 0 0 0 0.5)
+      backgroundBoxRadius
+      [TL, TR, BL, BR]
     drawTextLine glStuff dims texLine (V2 textX textY)
 
 checkGL :: (MonadIO m) => String -> m a -> m a
