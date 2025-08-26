@@ -40,6 +40,7 @@ import qualified Onyx.MIDI.Track.FiveFret         as Five
 import           Onyx.MIDI.Track.Mania
 import qualified Onyx.MIDI.Track.ProGuitar        as PG
 import           Onyx.MIDI.Track.Rocksmith
+import           Onyx.MIDI.Track.Vocal
 import           Onyx.Mode
 import           Onyx.PhaseShift.Dance            (NoteType (..))
 import           Onyx.Preferences                 (EliteDrumLayoutHint)
@@ -63,6 +64,7 @@ data PreviewTrack
   | PreviewFive (Map.Map Double (PNF.CommonState (PNF.GuitarState Double (Maybe Five.Color))))
   | PreviewPG PG.GtrTuning (Map.Map Double (PNF.CommonState (PNF.PGState Double)))
   | PreviewMania ManiaChart (Map.Map Double (PNF.CommonState PNF.ManiaState))
+  | PreviewVocal (Map.Map Double (PNF.CommonState (PNF.VocalState Double)))
   deriving (Show)
 
 data PreviewBG
@@ -373,6 +375,59 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
           `PNF.zipStateMaps` toggle result.other.fiveSolo
           `PNF.zipStateMaps` fmap Just beats
 
+  vocalTrack :: (SendMessage m) => F.PartName -> ModeVocal FilePath -> StackTraceT m (Map.Map Double (PNF.CommonState (PNF.VocalState Double)))
+  vocalTrack fpart _mv = do
+    let thisSrc = maybe mempty (.onyxPartVocals) $ Map.lookup fpart song.tracks.onyxParts
+    lyricNotes <- fmap (fromMaybe RTB.empty) $ errorToWarning $ getLyricNotes song.timesigs thisSrc
+    let beatsToDouble = secondsToDouble . U.applyTempoMap song.tempos
+
+        lyricNotesDouble :: [(Double, (LyricNote, Double))]
+        lyricNotesDouble
+          = map (\(t, (lyricNote, len)) -> (beatsToDouble t, (lyricNote, beatsToDouble (t + len))))
+          $ ATB.toPairList
+          $ RTB.toAbsoluteEventList 0 lyricNotes
+        lyricList :: [PNF.LyricSyllable Double]
+        lyricList = let
+          go [] = []
+          go ((start, (lyricNote, end)) : rest) = let
+            withLyric lyric maybeTalky = let
+              (end', rest') = extendEnd end rest
+              syllable = PNF.LyricSyllable
+                { timeStart = start
+                , lyric     = lyric
+                , talky     = maybeTalky
+                , timeEnd   = end'
+                }
+              in syllable : go rest'
+            in case lyricNote of
+              Pitched _     lyric -> withLyric lyric Nothing
+              Talky   tdiff lyric -> withLyric lyric $ Just tdiff
+              SlideTo _           -> go rest -- shouldn't happen!
+          extendEnd _   ((_, (SlideTo _, newEnd)) : rest) = extendEnd newEnd rest
+          extendEnd end rest                              = (end, rest)
+          in go lyricNotesDouble
+        lyrics :: [(Double, PNF.SustainView (PNF.LyricSyllable Double))]
+        lyrics = PNF.makeSustainView (.timeStart) (.timeEnd) lyricList
+
+        phrasesDouble :: [(Double, Double)]
+        phrasesDouble
+          = map (\(t, ((), (), len)) -> (beatsToDouble t, beatsToDouble (t + len)))
+          $ ATB.toPairList
+          $ RTB.toAbsoluteEventList 0
+          $ joinEdgesSimple
+          $ fmap (\b -> if b then EdgeOn () () else EdgeOff ())
+          $ thisSrc.vocalPhrase1
+        phrases :: [(Double, PNF.SustainView (Double, Double))]
+        phrases = PNF.makeSustainView fst snd phrasesDouble
+
+    return $ (\(((((a, b), c), d), e), f) -> PNF.CommonState (PNF.VocalState a b) c d e f) <$> do
+      Map.fromList lyrics
+        `PNF.zipStateMaps` Map.fromList phrases
+        `PNF.zipStateMaps` Map.empty
+        `PNF.zipStateMaps` Map.empty
+        `PNF.zipStateMaps` Map.empty
+        `PNF.zipStateMaps` fmap Just beats
+
   pgRocksmith rso = let
     notes = let
       eachString str = let
@@ -586,6 +641,14 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
         (chart, trk) <- maniaTracks pm fpart
         let name = F.displayPartName fpart <> " [Mania: " <> chart.name <> "]"
         return (name, PreviewMania chart trk)
+    getVocal = case part.vocal of
+      Nothing -> return []
+      Just pv -> do
+        let name = case fpart of
+              F.PartVocal -> "Vocals"
+              _           -> F.displayPartName fpart <> " [Vocals]"
+        result <- vocalTrack fpart pv
+        return [(name, PreviewVocal result)]
     pg = case part.proGuitar of
       Nothing     -> []
       Just ppg -> let
@@ -600,7 +663,8 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
       rs <- case part.proGuitar of
         Nothing  -> return []
         Just ppg -> rsTracks fpart ppg
-      return $ concat [mania, fiveNative, drums, pg, rs, fiveAuto]
+      vocal <- getVocal
+      return $ concat [mania, fiveNative, drums, vocal, pg, rs, fiveAuto]
 
   bgs = concat
     [ case songYaml.global.backgroundVideo of

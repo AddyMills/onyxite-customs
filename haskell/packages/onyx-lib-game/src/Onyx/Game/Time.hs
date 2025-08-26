@@ -1,6 +1,8 @@
 {-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveFoldable             #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE DeriveTraversable          #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE DerivingVia                #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
@@ -39,6 +41,7 @@ import           Onyx.MIDI.Track.Beat
 import           Onyx.MIDI.Track.Drums.Elite
 import qualified Onyx.MIDI.Track.FiveFret         as Five
 import qualified Onyx.MIDI.Track.ProGuitar        as PG
+import           Onyx.MIDI.Track.Vocal
 import           Onyx.PhaseShift.Dance            (NoteType (..))
 import qualified Sound.MIDI.Util                  as U
 
@@ -100,13 +103,15 @@ buildPNF
     Just (sust, len) -> Wait NNC.zero (Left (now, Just sust)) $ Wait len (Right sust) RNil
     )
 
-data Toggle
-  = ToggleEmpty -- Empty
-  | ToggleStart -- NF
-  | ToggleEnd -- P
-  | ToggleRestart -- PNF
-  | ToggleOn -- PF
-  deriving (Eq, Show)
+data SustainState a
+  = ToggleEmpty       -- Empty
+  | ToggleStart     a -- NF
+  | ToggleEnd     a   -- P
+  | ToggleRestart a a -- PNF
+  | ToggleOn        a -- PF
+  deriving (Eq, Show, Functor, Foldable, Traversable)
+
+type Toggle = SustainState ()
 
 makeToggle :: Map.Map t Bool -> Map.Map t Toggle
 makeToggle m = let
@@ -115,9 +120,9 @@ makeToggle m = let
     put b
     return $ case (cur, b) of
       (False, False) -> ToggleEmpty
-      (False, True)  -> ToggleStart
-      (True, False)  -> ToggleEnd
-      (True, True)   -> ToggleRestart
+      (False, True)  -> ToggleStart ()
+      (True, False)  -> ToggleEnd ()
+      (True, True)   -> ToggleRestart () ()
   in evalState (traverse go m) False
 
 data CommonState a = CommonState
@@ -194,6 +199,83 @@ newtype ManiaState = ManiaState
   } deriving (Show, Generic)
     deriving (TimeState) via GenericTimeState ManiaState
 
+data VocalState t = VocalState
+  { lyrics  :: SustainView (LyricSyllable t)
+  , phrases :: SustainView (t, t)
+  } deriving (Show, Generic)
+    deriving (TimeState) via GenericTimeState (VocalState t)
+
+data SustainView a = SustainView
+  { past   :: [a] -- in reverse order
+  , now    :: SustainState a
+  , future :: [a]
+  } deriving (Show)
+
+instance TimeState (SustainView t) where
+  before ls = case ls.now of
+    ToggleEmpty -> ls
+    ToggleStart syl -> ls
+      { now = ToggleEmpty
+      , future = syl : ls.future
+      }
+    ToggleEnd syl -> ls
+      { now = ToggleOn syl
+      }
+    ToggleRestart syl1 syl2 -> ls
+      { now = ToggleOn syl1
+      , future = syl2 : ls.future
+      }
+    ToggleOn _ -> ls
+  after ls = case ls.now of
+    ToggleEmpty -> ls
+    ToggleStart syl -> ls
+      { now = ToggleOn syl
+      }
+    ToggleEnd syl -> ls
+      { past = syl : ls.past
+      , now = ToggleEmpty
+      }
+    ToggleRestart syl1 syl2 -> ls
+      { past = syl1 : ls.past
+      , now = ToggleOn syl2
+      }
+    ToggleOn _ -> ls
+  empty = SustainView [] ToggleEmpty []
+
+data LyricSyllable t = LyricSyllable
+  { timeStart :: t
+  , lyric     :: Lyric
+  , talky     :: Maybe TalkyDifficulty
+  , timeEnd   :: t
+  } deriving (Show)
+
+makeSustainView :: (Eq t) => (a -> t) -> (a -> t) -> [a] -> [(t, SustainView a)]
+makeSustainView timeStart timeEnd initialFuture = let
+  makeStart past = \case
+    syl1 : rest -> (timeStart syl1, SustainView
+      { past = past
+      , now = ToggleStart syl1
+      , future = rest
+      }) : decideEndRestart past syl1 rest
+    [] -> []
+  decideEndRestart past syl1 rest = case rest of
+    syl2 : rest' | timeEnd syl1 == timeStart syl2
+      -> makeRestart past syl1 syl2 rest'
+    _ -> makeEnd past syl1 rest
+  makeEnd past syl rest = (timeEnd syl, SustainView
+    { past = past
+    , now = ToggleEnd syl
+    , future = rest
+    }) : makeStart (syl : past) rest
+  makeRestart past syl1 syl2 rest = (timeEnd syl1, SustainView
+    { past = past
+    , now = ToggleRestart syl1 syl2
+    , future = rest
+    }) : decideEndRestart (syl1 : past) syl2 rest
+  in makeStart [] initialFuture
+
+----------------------------------------------------
+
 class TimeState a where
   before :: a -> a
   before _ = empty
@@ -220,15 +302,19 @@ instance TimeState (PNF sust now) where
     PNF _past _now future -> PF future
   empty = Empty
 
-instance TimeState Toggle where
+instance TimeState (SustainState a) where
   before = \case
-    ToggleStart -> ToggleEmpty
-    ToggleEmpty -> ToggleEmpty
-    _           -> ToggleOn
+    ToggleEmpty       -> ToggleEmpty
+    ToggleStart     _ -> ToggleEmpty
+    ToggleEnd     x   -> ToggleOn x
+    ToggleRestart x _ -> ToggleOn x
+    ToggleOn        x -> ToggleOn x
   after = \case
-    ToggleEnd   -> ToggleEmpty
-    ToggleEmpty -> ToggleEmpty
-    _           -> ToggleOn
+    ToggleEmpty       -> ToggleEmpty
+    ToggleStart     x -> ToggleOn x
+    ToggleEnd     _   -> ToggleEmpty
+    ToggleRestart _ x -> ToggleOn x
+    ToggleOn        x -> ToggleOn x
   empty = ToggleEmpty
 
 instance TimeState (Maybe a) where
