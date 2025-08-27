@@ -1566,16 +1566,23 @@ drawLyrics gl dims (x, y, w, h) nowTime vocals = let
     Just (phraseStart, phraseEnd) -> concat
       [ reverse $ takeWhile (\syl -> phraseStart <= syl.timeStart) common.inner.lyrics.past
       , toList common.inner.lyrics.now
-      , takeWhile (\syl -> syl.timeStart <= phraseEnd) common.inner.lyrics.future
+      , takeWhile (\syl -> syl.timeStart < phraseEnd) common.inner.lyrics.future
       ]
-  simpleText = T.strip $ T.concat $ do
-    syl <- currentSyllables
+  (past, future) = span (\syl -> syl.timeStart <= nowTime) currentSyllables
+  joinText syls = T.concat $ do
+    syl <- syls
     syl.lyric.lyricText : if syl.lyric.lyricContinues then [] else [" "]
-  in unless (T.null simpleText) $ do
+  futureText = T.strip $ joinText future
+  pastText = (if T.null futureText then T.strip else T.stripStart) $ joinText past
+  in unless (T.null pastText && T.null futureText) $ do
 
-    texLine <- prepareText gl simpleText
+    pastTextures <- prepareText gl pastText
+    futureTextures <- prepareText gl futureText
 
-    let lineWidth = fromIntegral $ sum (map (vX . gsrAdvance . fst) texLine) `shiftR` 6 :: Int
+    let pastColor = V4 (255 / 255) (231 / 255) (83 / 255) 1
+        coloredTextures = map (, Just pastColor) pastTextures <> map (, Nothing) futureTextures
+
+        lineWidth = fromIntegral $ sum (map (vX . gsrAdvance . fst . fst) coloredTextures) `shiftR` 6 :: Int
         boxWidth  = 2 * margin + lineWidth
         boxHeight = 2 * margin + fontSize - 5
         boxX      = x + quot (w - boxWidth) 2
@@ -1591,7 +1598,7 @@ drawLyrics gl dims (x, y, w, h) nowTime vocals = let
       (V4 0 0 0 0.8)
       backgroundBoxRadius
       [TL, TR, BL, BR]
-    drawTextLine gl dims texLine (V2 textX textY)
+    drawTextLine gl dims coloredTextures (V2 textX textY)
 
 fillPtr :: (Storable a, MonadIO m) => (Ptr a -> IO ()) -> m a
 fillPtr f = liftIO $ alloca $ \p -> f p >> peek p
@@ -2529,16 +2536,16 @@ stopVideoLoaders GLStuff{..} = liftIO $ do
 
 data WindowDims = WindowDims Int Int
 
-drawTextureFade :: GLStuff -> WindowDims -> Texture -> V2 Int -> Int -> IO ()
+drawTextureFade :: GLStuff -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
 drawTextureFade glstuff = drawTexture' glstuff $ let
   fade = (gfxConfig glstuff).view.track_fade
   in (fade.bottom, fade.top)
 
-drawTexture :: GLStuff -> WindowDims -> Texture -> V2 Int -> Int -> IO ()
+drawTexture :: GLStuff -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
 drawTexture glstuff = drawTexture' glstuff (1, 1)
 
-drawTexture' :: GLStuff -> (Float, Float) -> WindowDims -> Texture -> V2 Int -> Int -> IO ()
-drawTexture' GLStuff{..} (fadeBottom, fadeTop) (WindowDims screenW screenH) (Texture tex w h) (V2 x y) scale = do
+drawTexture' :: GLStuff -> (Float, Float) -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
+drawTexture' GLStuff{..} (fadeBottom, fadeTop) (WindowDims screenW screenH) (Texture tex w h) maybeColor (V2 x y) scale = do
   glUseProgram quadShader
   glActiveTexture GL_TEXTURE0
   checkGL "glBindTexture" $ glBindTexture GL_TEXTURE_2D tex
@@ -2558,7 +2565,11 @@ drawTexture' GLStuff{..} (fadeBottom, fadeTop) (WindowDims screenW screenH) (Tex
   sendUniformName quadShader "startFade" fadeBottom
   sendUniformName quadShader "endFade" fadeTop
   sendUniformName quadShader "doFXAA" fxaaEnabled
-  sendUniformName quadShader "isColor" False
+  case maybeColor of
+    Nothing -> sendUniformName quadShader "colorMode" (2 :: GLuint)
+    Just color -> do
+      sendUniformName quadShader "colorMode" (1 :: GLuint)
+      sendUniformName quadShader "color" color
   checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES (objVertexCount quadObject) GL_UNSIGNED_INT nullPtr
 
 drawColor :: GLStuff -> WindowDims -> RenderObject -> V2 Int -> V2 Int -> V4 Float -> IO ()
@@ -2579,7 +2590,7 @@ drawColor GLStuff{..} (WindowDims screenW screenH) object (V2 x y) (V2 w h) colo
     (fromIntegral h :: Float)
   sendUniformName quadShader "startFade" (1 :: Float)
   sendUniformName quadShader "endFade" (1 :: Float)
-  sendUniformName quadShader "isColor" True
+  sendUniformName quadShader "colorMode" (0 :: GLuint)
   sendUniformName quadShader "color" color
   checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES (objVertexCount object) GL_UNSIGNED_INT nullPtr
 
@@ -2660,7 +2671,7 @@ drawBackground GLStuff{..} (WindowDims screenW screenH) mode (Texture tex w h) =
   sendUniformName quadShader "startFade" (1 :: Float)
   sendUniformName quadShader "endFade" (1 :: Float)
   sendUniformName quadShader "doFXAA" False
-  sendUniformName quadShader "isColor" False
+  sendUniformName quadShader "colorMode" (2 :: GLuint)
   checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES (objVertexCount quadObject) GL_UNSIGNED_INT nullPtr
 
 freeTexture :: (MonadIO m) => Texture -> m ()
@@ -2827,16 +2838,16 @@ prepareText glStuff = fmap catMaybes . mapM (getGlyph glStuff) . T.unpack
 drawTextLine
   :: GLStuff
   -> WindowDims
-  -> [(FT_GlyphSlotRec, Texture)]
+  -> [((FT_GlyphSlotRec, Texture), Maybe (V4 Float))]
   -> V2 Int
   -> IO ()
 drawTextLine glStuff dims chars penStart = let
   drawLoop _   [] = return ()
-  drawLoop pen ((gsr, tex) : rest) = do
+  drawLoop pen (((gsr, tex), maybeColor) : rest) = do
     let penOffset  = fromIntegral <$> V2 (gsrBitmap_left gsr) (gsrBitmap_top gsr)
         penOffsetH = V2 0 (negate $ textureHeight tex)
         penAdvance = fromIntegral . (`shiftR` 6) <$> V2 (vX $ gsrAdvance gsr) (vY $ gsrAdvance gsr)
-    drawTexture glStuff dims tex (pen + penOffset + penOffsetH) 1
+    drawTexture glStuff dims tex maybeColor (pen + penOffset + penOffsetH) 1
     drawLoop (pen + penAdvance) rest
   in drawLoop penStart chars
 
@@ -2860,7 +2871,7 @@ drawTimeBox glStuff dims@(WindowDims _ hWhole) timeLines = do
     backgroundBoxRadius
     [BR]
   forM_ (zip [1..] texLines) $ \(i, texLine) -> do
-    drawTextLine glStuff dims texLine $ V2 margin $ hWhole - (margin + fontSize) * i
+    drawTextLine glStuff dims (map (, Nothing) texLine) $ V2 margin $ hWhole - (margin + fontSize) * i
 
 drawTracks
   :: GLStuff
@@ -2960,7 +2971,7 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
         glBindFramebuffer GL_FRAMEBUFFER 0
         glClear GL_DEPTH_BUFFER_BIT
         glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
-        drawTextureFade glStuff dims (Texture simpleFBOTex w h) (V2 x y) 1
+        drawTextureFade glStuff dims (Texture simpleFBOTex w h) Nothing (V2 x y) 1
 
       MSAAFramebuffers{..} -> do
 
@@ -2974,7 +2985,7 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
         glBindFramebuffer GL_FRAMEBUFFER 0
         glClear GL_DEPTH_BUFFER_BIT
         glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
-        drawTextureFade glStuff dims (Texture intermediateFBOTex w h) (V2 x y) 1
+        drawTextureFade glStuff dims (Texture intermediateFBOTex w h) Nothing (V2 x y) 1
 
     return mvp
 
@@ -3005,7 +3016,7 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
       (V4 0 0 0 0.5)
       backgroundBoxRadius
       [TL, TR, BL, BR]
-    drawTextLine glStuff dims texLine (V2 textX textY)
+    drawTextLine glStuff dims (map (, Nothing) texLine) (V2 textX textY)
 
 checkGL :: (MonadIO m) => String -> m a -> m a
 checkGL s f = do

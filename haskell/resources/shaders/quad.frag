@@ -4,7 +4,7 @@ out vec4 FragColor;
 in vec2 TexCoord;
 
 uniform sampler2D inTexture;
-uniform bool isColor;
+uniform uint colorMode; // 0 = flat color, 1 = color * texture, 2 = texture
 uniform vec4 color;
 uniform vec2 inResolution;
 uniform float startFade;
@@ -135,13 +135,20 @@ vec4 apply(sampler2D tex, vec2 fragCoord, vec2 resolution) {
 
 void main()
 {
+  if (colorMode == 0u) {
+    FragColor = color;
+    return;
+  } else if (colorMode == 1u) {
+    FragColor = color * texture(inTexture, TexCoord);
+    return;
+  }
+
   // implement note highway horizon fade
   float horizonFade = 1.0 - (TexCoord.y - startFade) / (endFade - startFade);
   if (horizonFade > 1.0) horizonFade = 1.0;
   if (horizonFade < 0.0) horizonFade = 0.0;
-  vec4 result = isColor
-    ? color
-    : doFXAA
+  vec4 result
+    = doFXAA
     ? apply(inTexture, TexCoord * inResolution, inResolution)
     : texture(inTexture, TexCoord)
     ;
