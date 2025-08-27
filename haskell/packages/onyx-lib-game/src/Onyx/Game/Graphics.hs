@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE NegativeLiterals      #-}
+{-# LANGUAGE NoFieldSelectors      #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RecordWildCards       #-}
@@ -101,18 +102,18 @@ data ColorSource
   | CSImage3 TextureID TextureID TextureID
 
 drawObject :: GLStuff -> Object -> ObjectPosition -> ColorSource -> Float -> LightPosition -> IO ()
-drawObject GLStuff{..} obj posn colorSource alpha lightOffset = do
+drawObject gl obj posn colorSource alpha lightOffset = do
   let colorType    = 1 :: GLuint
       texture1Type = 2 :: GLuint
       texture2Type = 3 :: GLuint
       texture3Type = 4 :: GLuint
       thisObject = case obj of
-        Box           -> boxObject
-        Flat          -> flatObject
-        Model modelID -> fromMaybe (flatObject { objVertexCount = 0 })
-          $ lookup modelID models
-  glBindVertexArray $ objVAO thisObject
-  sendUniformName objectShader "model" $ case posn of
+        Box           -> gl.boxObject
+        Flat          -> gl.flatObject
+        Model modelID -> fromMaybe (gl.flatObject { objVertexCount = 0 })
+          $ lookup modelID gl.models
+  glBindVertexArray thisObject.objVAO
+  sendUniformName gl.objectShader "model" $ case posn of
     ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2) -> let
       yScale = case obj of
         Flat -> 1 -- so we don't try to scale by 0 since y1 == y2
@@ -120,66 +121,66 @@ drawObject GLStuff{..} obj posn colorSource alpha lightOffset = do
       in translate4 (V3 ((x1 + x2) / 2) ((y1 + y2) / 2) ((z1 + z2) / 2))
         !*! L.scaled (V4 (abs $ x2 - x1) yScale (abs $ z2 - z1) 1)
     ObjectMove xyz -> translate4 xyz
-  sendUniformName objectShader "alpha" alpha
+  sendUniformName gl.objectShader "alpha" alpha
   case lightOffset of
     LightGlobal g -> do
-      sendUniformName objectShader "light.position" g.position
-      sendUniformName objectShader "light.ambient"  g.ambient
-      sendUniformName objectShader "light.diffuse"  g.diffuse
-      sendUniformName objectShader "light.specular" g.specular
+      sendUniformName gl.objectShader "light.position" g.position
+      sendUniformName gl.objectShader "light.ambient"  g.ambient
+      sendUniformName gl.objectShader "light.diffuse"  g.diffuse
+      sendUniformName gl.objectShader "light.specular" g.specular
     LightOffset off -> do
       let center = case posn of
             ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)
               -> V3 ((x1 + x2) / 2) (max y1 y2) ((z1 + z2) / 2)
             ObjectMove xyz -> xyz
-      sendUniformName objectShader "light.position" $ center + off.position
-      sendUniformName objectShader "light.ambient"  off.ambient
-      sendUniformName objectShader "light.diffuse"  off.diffuse
-      sendUniformName objectShader "light.specular" off.specular
+      sendUniformName gl.objectShader "light.position" $ center + off.position
+      sendUniformName gl.objectShader "light.ambient"  off.ambient
+      sendUniformName gl.objectShader "light.diffuse"  off.diffuse
+      sendUniformName gl.objectShader "light.specular" off.specular
   let missingTexture = do
-        sendUniformName objectShader "material.diffuse.type" colorType
-        sendUniformName objectShader "material.diffuse.color" (V4 1 0 1 1 :: V4 Float) -- magenta for missing texture
+        sendUniformName gl.objectShader "material.diffuse.type" colorType
+        sendUniformName gl.objectShader "material.diffuse.color" (V4 1 0 1 1 :: V4 Float) -- magenta for missing texture
   case colorSource of
     CSColor color -> do
-      sendUniformName objectShader "material.diffuse.type" colorType
-      sendUniformName objectShader "material.diffuse.color" color
+      sendUniformName gl.objectShader "material.diffuse.type" colorType
+      sendUniformName gl.objectShader "material.diffuse.color" color
     CSImage texid -> do
-      case lookup texid textures of
+      case lookup texid gl.textures of
         Just tex -> do
           glActiveTexture GL_TEXTURE0
-          glBindTexture GL_TEXTURE_2D $ textureGL tex
-          sendUniformName objectShader "material.diffuse.type" texture1Type
-          sendUniformName objectShader "material.diffuse.image" (0 :: GLint)
+          glBindTexture GL_TEXTURE_2D tex.textureGL
+          sendUniformName gl.objectShader "material.diffuse.type" texture1Type
+          sendUniformName gl.objectShader "material.diffuse.image" (0 :: GLint)
         Nothing -> missingTexture
     CSImage2 t1 t2 -> do
-      case (lookup t1 textures, lookup t2 textures) of
+      case (lookup t1 gl.textures, lookup t2 gl.textures) of
         (Just tex1, Just tex2) -> do
           glActiveTexture GL_TEXTURE0
-          glBindTexture GL_TEXTURE_2D $ textureGL tex1
+          glBindTexture GL_TEXTURE_2D tex1.textureGL
           glActiveTexture GL_TEXTURE1
-          glBindTexture GL_TEXTURE_2D $ textureGL tex2
-          sendUniformName objectShader "material.diffuse.type" texture2Type
-          sendUniformName objectShader "material.diffuse.image"  (0 :: GLint)
-          sendUniformName objectShader "material.diffuse.image2" (1 :: GLint)
+          glBindTexture GL_TEXTURE_2D tex2.textureGL
+          sendUniformName gl.objectShader "material.diffuse.type" texture2Type
+          sendUniformName gl.objectShader "material.diffuse.image"  (0 :: GLint)
+          sendUniformName gl.objectShader "material.diffuse.image2" (1 :: GLint)
         _ -> missingTexture
     CSImage3 t1 t2 t3 -> do
-      case (lookup t1 textures, lookup t2 textures, lookup t3 textures) of
+      case (lookup t1 gl.textures, lookup t2 gl.textures, lookup t3 gl.textures) of
         (Just tex1, Just tex2, Just tex3) -> do
           glActiveTexture GL_TEXTURE0
-          glBindTexture GL_TEXTURE_2D $ textureGL tex1
+          glBindTexture GL_TEXTURE_2D tex1.textureGL
           glActiveTexture GL_TEXTURE1
-          glBindTexture GL_TEXTURE_2D $ textureGL tex2
+          glBindTexture GL_TEXTURE_2D tex2.textureGL
           glActiveTexture GL_TEXTURE2
-          glBindTexture GL_TEXTURE_2D $ textureGL tex3
-          sendUniformName objectShader "material.diffuse.type" texture3Type
-          sendUniformName objectShader "material.diffuse.image"  (0 :: GLint)
-          sendUniformName objectShader "material.diffuse.image2" (1 :: GLint)
-          sendUniformName objectShader "material.diffuse.image3" (2 :: GLint)
+          glBindTexture GL_TEXTURE_2D tex3.textureGL
+          sendUniformName gl.objectShader "material.diffuse.type" texture3Type
+          sendUniformName gl.objectShader "material.diffuse.image"  (0 :: GLint)
+          sendUniformName gl.objectShader "material.diffuse.image2" (1 :: GLint)
+          sendUniformName gl.objectShader "material.diffuse.image3" (2 :: GLint)
         _ -> missingTexture
-  sendUniformName objectShader "material.specular.type" colorType
-  sendUniformName objectShader "material.specular.color" (V4 0.5 0.5 0.5 1 :: V4 Float) -- CONFIGME
-  sendUniformName objectShader "material.shininess" (32 :: Float)
-  glDrawArrays GL_TRIANGLES 0 $ objVertexCount thisObject
+  sendUniformName gl.objectShader "material.specular.type" colorType
+  sendUniformName gl.objectShader "material.specular.color" (V4 0.5 0.5 0.5 1 :: V4 Float) -- CONFIGME
+  sendUniformName gl.objectShader "material.shininess" (32 :: Float)
+  glDrawArrays GL_TRIANGLES 0 thisObject.objVertexCount
 
 makeToggleBounds :: t -> t -> Map.Map t Toggle -> [(t, t, Bool)]
 makeToggleBounds t1 t2 m = let
@@ -198,7 +199,7 @@ makeToggleBounds t1 t2 m = let
   in simplify zipped
 
 drawDrums :: GLStuff -> Double -> Double -> DrumMode -> Map.Map Double (CommonState (DrumState (D.Gem D.ProType, D.DrumVelocity) (D.Gem D.ProType))) -> IO ()
-drawDrums glStuff nowTime speed mode trk = drawDrumPlay glStuff nowTime speed mode DrumPlayState
+drawDrums gl nowTime speed mode trk = drawDrumPlay gl nowTime speed mode DrumPlayState
   { events = do
     (cst, cs) <- Map.toDescList $ fst $ Map.split nowTime trk
     pad <- Set.toList cs.inner.notes
@@ -212,7 +213,7 @@ drawDrums glStuff nowTime speed mode trk = drawDrumPlay glStuff nowTime speed mo
   }
 
 drawEliteDrums :: GLStuff -> Double -> Double -> [EliteDrumLayoutHint] -> Map.Map Double (CommonState (EliteDrumState Double (EliteDrumNote ED.FlamStatus) (ED.EliteGem ()))) -> IO ()
-drawEliteDrums glStuff nowTime speed layout trk = drawEliteDrumPlay glStuff nowTime speed layout EliteDrumPlayState
+drawEliteDrums gl nowTime speed layout trk = drawEliteDrumPlay gl nowTime speed layout EliteDrumPlayState
   { events = let
     -- dummy game state with no inputs, but all notes marked as hit on time
     hitResults = do
@@ -226,21 +227,21 @@ drawEliteDrums glStuff nowTime speed layout trk = drawEliteDrumPlay glStuff nowT
   }
 
 drawEliteDrumPlay :: GLStuff -> Double -> Double -> [EliteDrumLayoutHint] -> EliteDrumPlayState Double -> IO ()
-drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
-  glUseProgram objectShader
+drawEliteDrumPlay gl nowTime speed layout tdps = do
+  glUseProgram gl.objectShader
   -- view and projection matrices should already have been set
-  let drawObject' = drawObject glStuff
-      globalLight = LightGlobal gfxConfig.track.light
-      nearZ = gfxConfig.track.time.z_past
-      nowZ = gfxConfig.track.time.z_now
-      farZ = gfxConfig.track.time.z_future
-      farTime = nowTime + speed * realToFrac gfxConfig.track.time.secs_future :: Double
+  let draw = drawObject gl
+      globalLight = LightGlobal gl.gfxConfig.track.light
+      nearZ = gl.gfxConfig.track.time.z_past
+      nowZ = gl.gfxConfig.track.time.z_now
+      farZ = gl.gfxConfig.track.time.z_future
+      farTime = nowTime + speed * realToFrac gl.gfxConfig.track.time.secs_future :: Double
       timeToZ t = nowZ + (farZ - nowZ) * realToFrac ((t - nowTime) / (farTime - nowTime))
       zToTime z = nowTime + (farTime - nowTime) * realToFrac ((z - nowZ) / (farZ - nowZ))
       nearTime = zToTime nearZ
       zoomed = zoomMap nearTime farTime tdps.track
-      adjustedLeft = gfxConfig.track.note_area.x_left * 1.3
-      adjustedRight = gfxConfig.track.note_area.x_right * 1.3
+      adjustedLeft = gl.gfxConfig.track.note_area.x_left * 1.3
+      adjustedRight = gl.gfxConfig.track.note_area.x_right * 1.3
       trackWidth = adjustedRight - adjustedLeft
       fracToX f = adjustedLeft + trackWidth * f
       drawBeat t cs = case cs.beats of
@@ -253,18 +254,18 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
           z = timeToZ t
           xyz1 = V3
             (fracToX 0)
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_past)
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_past)
           xyz2 = V3
             (fracToX 1)
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_future)
-          in drawObject' Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_future)
+          in draw Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
       drawTargetSquare x1 x2 tex alpha = let
-        y = gfxConfig.track.y
-        z1 = gfxConfig.track.targets.z_past
-        z2 = gfxConfig.track.targets.z_future
-        in drawObject' Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
+        y = gl.gfxConfig.track.y
+        z1 = gl.gfxConfig.track.targets.z_past
+        z2 = gl.gfxConfig.track.targets.z_future
+        in draw Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
       layoutLeftOpenHand = fromMaybe False $ listToMaybe $ flip mapMaybe layout $ \case
         EDLeftCrossHand -> Just False
         EDLeftOpenHand  -> Just True
@@ -324,7 +325,7 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
             D.VelocityNormal -> CSImage texid
             D.VelocityGhost  -> CSImage2 texid TextureOverlayGhost
             D.VelocityAccent -> CSImage2 texid TextureOverlayAccent
-          Just _  -> CSColor gfxConfig.objects.gems.color_hit
+          Just _  -> CSColor gl.gfxConfig.objects.gems.color_hit
         (x1, x2) = gemBounds $ tdn_gem note
         xCenter = x1 + (x2 - x1) / 2
         (x1', x2') = case tdn_velocity note of
@@ -356,20 +357,20 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
               ]
             _            -> [((x1', x2'), obj)]
         (y1, y2) = (y - reference, y + reference)
-        y = gfxConfig.track.y
+        y = gl.gfxConfig.track.y
         (z1, z2) = (z - reference, z + reference)
         z = timeToZ t
-        in forM_ xPairs $ \((thisX1, thisX2), obj') -> drawObject' obj'
+        in forM_ xPairs $ \((thisX1, thisX2), obj') -> draw obj'
           (ObjectStretch (V3 thisX1 y1 z1) (V3 thisX2 y2 z2))
           shade
           (fromMaybe 1 alpha)
-          (LightOffset gfxConfig.objects.gems.light)
+          (LightOffset gl.gfxConfig.objects.gems.light)
       drawNotes t cs = let
         od = case cs.overdrive of
           ToggleEmpty  -> False
           ToggleEnd () -> False
           _            -> True
-        fadeTime = gfxConfig.objects.gems.secs_fade
+        fadeTime = gl.gfxConfig.objects.gems.secs_fade
         in forM_ cs.inner.notes $ \gem ->
           case eliteNoteStatus t gem tdps.events of
             NoteFuture -> drawGem t od gem Nothing
@@ -391,18 +392,18 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
   forM_ (makeToggleBounds nearTime farTime $ fmap (.solo) zoomed) $ \(t1, t2, isSolo) -> do
     let highwayColor
           = (if isSolo then (.solo) else (.normal))
-          $ gfxConfig.track.color
-    drawObject'
+          $ gl.gfxConfig.track.color
+    draw
       Flat
       (ObjectStretch
         (V3
           adjustedLeft
-          gfxConfig.track.y
+          gl.gfxConfig.track.y
           (timeToZ t1)
         )
         (V3
           adjustedRight
-          gfxConfig.track.y
+          gl.gfxConfig.track.y
           (timeToZ t2)
         )
       )
@@ -413,11 +414,11 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
   forM_ targets $ \(pads, _, _, mtint) -> forM_ mtint $ \tint -> do
     let x1 = minimum $ map (fst . gemBounds) pads
         x2 = maximum $ map (snd . gemBounds) pads
-    drawObject'
+    draw
       Flat
       (ObjectStretch
-        (V3 x1 gfxConfig.track.y nearZ)
-        (V3 x2 gfxConfig.track.y farZ)
+        (V3 x1 gl.gfxConfig.track.y nearZ)
+        (V3 x2 gl.gfxConfig.track.y farZ)
       )
       (CSColor tint)
       1
@@ -432,19 +433,19 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
     (tex, zoneT1, zoneT2) = case zone of
       EliteHihatZoneSolid t1 t2 -> (TextureHihatZoneSolid, t1, t2)
       EliteHihatZoneFade  t1 t2 -> (TextureHihatZoneFade , t1, t2)
-    in drawObject'
+    in draw
       Flat
       (ObjectStretch
-        (V3 hihatZoneX1 gfxConfig.track.y $ timeToZ zoneT2)
-        (V3 hihatZoneX2 gfxConfig.track.y $ timeToZ zoneT1)
+        (V3 hihatZoneX1 gl.gfxConfig.track.y $ timeToZ zoneT2)
+        (V3 hihatZoneX2 gl.gfxConfig.track.y $ timeToZ zoneT1)
       )
       (CSImage tex)
       1
       globalLight
   glDepthFunc GL_LESS
   -- draw railings
-  let rail = gfxConfig.track.railings
-  drawObject' Box
+  let rail = gl.gfxConfig.track.railings
+  draw Box
     (ObjectStretch
       (V3
         (adjustedLeft - rail.x_width)
@@ -458,7 +459,7 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
       )
     )
     (CSColor rail.color) 1 globalLight
-  drawObject' Box
+  draw Box
     (ObjectStretch
       (V3
         adjustedRight
@@ -478,7 +479,7 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
   -- draw lanes
   let drawLane startTime endTime gem = let
         (x1, x2) = gemBounds gem
-        y = gfxConfig.track.y
+        y = gl.gfxConfig.track.y
         z1 = timeToZ startTime
         z2 = timeToZ endTime
         tex = case gem of
@@ -492,7 +493,7 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
           ED.Tom3      -> TextureLaneOrange
           ED.Ride      -> TextureLaneBlue
           ED.CrashR    -> TextureLaneGreen
-        in drawObject' Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) 1 globalLight
+        in draw Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) 1 globalLight
       drawLanes _        []                      = return ()
       drawLanes nextTime ((thisTime, cs) : rest) = do
         let lanes = Map.toList cs.inner.lanes
@@ -520,7 +521,7 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
       drawLights ((t, note) : states) colors = let
         pad = note.gem
         (colorsYes, colorsNo) = partition (\(pads, _, _, _) -> elem pad pads) colors
-        alpha = 1 - realToFrac (nowTime - t) / gfxConfig.track.targets.secs_light
+        alpha = 1 - realToFrac (nowTime - t) / gl.gfxConfig.track.targets.secs_light
         in when (t > nearTime) $ do
           forM_ colorsYes $ \(pads, _, light, _) -> let
             x1 = minimum $ map (fst . gemBounds) pads
@@ -549,8 +550,8 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
               EliteHihatStompImplicit -> 0.5
             stompAlpha = stompTypeAlpha * if t >= nowTime
               then 1
-              else max 0 $ 1 - realToFrac (nowTime - t) / gfxConfig.objects.gems.secs_fade
-        drawObject' Box
+              else max 0 $ 1 - realToFrac (nowTime - t) / gl.gfxConfig.objects.gems.secs_fade
+        draw Box
           (ObjectStretch
             (V3
               (outsideRailLeft - stompWidth)
@@ -563,8 +564,8 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
               (stompZ + stompWidth / 2)
             )
           )
-          (CSColor stompColor) stompAlpha (LightOffset gfxConfig.objects.gems.light)
-        drawObject' Box
+          (CSColor stompColor) stompAlpha (LightOffset gl.gfxConfig.objects.gems.light)
+        draw Box
           (ObjectStretch
             (V3
               outsideRailRight
@@ -577,28 +578,28 @@ drawEliteDrumPlay glStuff@GLStuff{..} nowTime speed layout tdps = do
               (stompZ + stompWidth / 2)
             )
           )
-          (CSColor stompColor) stompAlpha (LightOffset gfxConfig.objects.gems.light)
+          (CSColor stompColor) stompAlpha (LightOffset gl.gfxConfig.objects.gems.light)
   traverseDescWithKey_ drawStomps zoomed
   -}
 
 drawDrumPlay :: GLStuff -> Double -> Double -> DrumMode -> DrumPlayState Double (D.Gem D.ProType, D.DrumVelocity) (D.Gem D.ProType) -> IO ()
-drawDrumPlay glStuff@GLStuff{..} nowTime speed mode dps = do
-  glUseProgram objectShader
+drawDrumPlay gl nowTime speed mode dps = do
+  glUseProgram gl.objectShader
   -- view and projection matrices should already have been set
-  let drawObject' = drawObject glStuff
-      globalLight = LightGlobal gfxConfig.track.light
-      nearZ = gfxConfig.track.time.z_past
-      nowZ = gfxConfig.track.time.z_now
-      farZ = gfxConfig.track.time.z_future
-      farTime = nowTime + speed * realToFrac gfxConfig.track.time.secs_future :: Double
+  let draw = drawObject gl
+      globalLight = LightGlobal gl.gfxConfig.track.light
+      nearZ = gl.gfxConfig.track.time.z_past
+      nowZ = gl.gfxConfig.track.time.z_now
+      farZ = gl.gfxConfig.track.time.z_future
+      farTime = nowTime + speed * realToFrac gl.gfxConfig.track.time.secs_future :: Double
       timeToZ t = nowZ + (farZ - nowZ) * realToFrac ((t - nowTime) / (farTime - nowTime))
       zToTime z = nowTime + (farTime - nowTime) * realToFrac ((z - nowZ) / (farZ - nowZ))
       nearTime = zToTime nearZ
       zoomed = zoomMap nearTime farTime dps.track
       trackWidth
-        = gfxConfig.track.note_area.x_right
-        - gfxConfig.track.note_area.x_left
-      fracToX f = gfxConfig.track.note_area.x_left + trackWidth * f
+        = gl.gfxConfig.track.note_area.x_right
+        - gl.gfxConfig.track.note_area.x_left
+      fracToX f = gl.gfxConfig.track.note_area.x_left + trackWidth * f
       laneCount = case mode of
         Drums5 -> 5
         _      -> 4
@@ -618,7 +619,7 @@ drawDrumPlay glStuff@GLStuff{..} nowTime speed mode dps = do
             D.VelocityNormal -> CSImage texid
             D.VelocityGhost  -> CSImage2 texid TextureOverlayGhost
             D.VelocityAccent -> CSImage2 texid TextureOverlayAccent
-          Just _  -> CSColor gfxConfig.objects.gems.color_hit
+          Just _  -> CSColor gl.gfxConfig.objects.gems.color_hit
         (x1, x2) = case mode of
           Drums5 -> case gem of
             D.Kick           -> (-1, 1)
@@ -644,18 +645,18 @@ drawDrumPlay glStuff@GLStuff{..} nowTime speed mode dps = do
           D.Kick -> (x2' - x1') / 2
           _      -> 0.5 / 2
         (y1, y2) = (y - reference, y + reference)
-        y = gfxConfig.track.y
+        y = gl.gfxConfig.track.y
         (z1, z2) = (z - reference, z + reference)
         z = timeToZ t
         posn = ObjectStretch (V3 x1' y1 z1) (V3 x2' y2 z2)
-        in drawObject' obj posn shade (fromMaybe 1 alpha) $ LightOffset
-          $ gfxConfig.objects.gems.light
+        in draw obj posn shade (fromMaybe 1 alpha)
+          $ LightOffset gl.gfxConfig.objects.gems.light
       drawNotes t cs = let
         od = case cs.overdrive of
           ToggleEmpty  -> False
           ToggleEnd () -> False
           _            -> True
-        fadeTime = gfxConfig.objects.gems.secs_fade
+        fadeTime = gl.gfxConfig.objects.gems.secs_fade
         in forM_ cs.inner.notes $ \gem ->
           case noteStatus t gem dps.events of
             NoteFuture -> drawGem t od gem Nothing
@@ -672,37 +673,37 @@ drawDrumPlay glStuff@GLStuff{..} nowTime speed mode dps = do
             Nothing   -> TextureLine3
           z = timeToZ t
           xyz1 = V3
-            gfxConfig.track.note_area.x_left
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_past)
+            gl.gfxConfig.track.note_area.x_left
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_past)
           xyz2 = V3
-            gfxConfig.track.note_area.x_right
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_future)
-          in drawObject' Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
+            gl.gfxConfig.track.note_area.x_right
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_future)
+          in draw Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
       drawTargetSquare i tex alpha = let
         x1 = fracToX $ i       / laneCount
         x2 = fracToX $ (i + 1) / laneCount
-        y = gfxConfig.track.y
-        z1 = gfxConfig.track.targets.z_past
-        z2 = gfxConfig.track.targets.z_future
-        in drawObject' Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
+        y = gl.gfxConfig.track.y
+        z1 = gl.gfxConfig.track.targets.z_past
+        z2 = gl.gfxConfig.track.targets.z_future
+        in draw Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
   -- draw highway
   forM_ (makeToggleBounds nearTime farTime $ fmap (.solo) zoomed) $ \(t1, t2, isSolo) -> do
     let highwayColor
           = (if isSolo then (.solo) else (.normal))
-          $ gfxConfig.track.color
-    drawObject'
+          $ gl.gfxConfig.track.color
+    draw
       Flat
       (ObjectStretch
         (V3
-          gfxConfig.track.note_area.x_left
-          gfxConfig.track.y
+          gl.gfxConfig.track.note_area.x_left
+          gl.gfxConfig.track.y
           (timeToZ t1)
         )
         (V3
-          gfxConfig.track.note_area.x_right
-          gfxConfig.track.y
+          gl.gfxConfig.track.note_area.x_right
+          gl.gfxConfig.track.y
           (timeToZ t2)
         )
       )
@@ -710,9 +711,9 @@ drawDrumPlay glStuff@GLStuff{..} nowTime speed mode dps = do
       1
       globalLight
   -- draw railings
-  let rail = gfxConfig.track.railings
-      noteArea = gfxConfig.track.note_area
-  drawObject' Box
+  let rail = gl.gfxConfig.track.railings
+      noteArea = gl.gfxConfig.track.note_area
+  draw Box
     (ObjectStretch
       (V3
         (noteArea.x_left - rail.x_width)
@@ -726,7 +727,7 @@ drawDrumPlay glStuff@GLStuff{..} nowTime speed mode dps = do
       )
     )
     (CSColor rail.color) 1 globalLight
-  drawObject' Box
+  draw Box
     (ObjectStretch
       (V3
         noteArea.x_right
@@ -759,7 +760,7 @@ drawDrumPlay glStuff@GLStuff{..} nowTime speed mode dps = do
             _                -> 0
         x1 = fracToX $ i       / laneCount
         x2 = fracToX $ (i + 1) / laneCount
-        y = gfxConfig.track.y
+        y = gl.gfxConfig.track.y
         z1 = timeToZ startTime
         z2 = timeToZ endTime
         tex = case pad of
@@ -768,7 +769,7 @@ drawDrumPlay glStuff@GLStuff{..} nowTime speed mode dps = do
           D.Pro D.Blue   _ -> TextureLaneBlue
           D.Pro D.Green  _ -> TextureLaneGreen
           _                -> TextureLaneOrange
-        in drawObject' Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) 1 globalLight
+        in draw Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) 1 globalLight
       drawLanes _        []                      = return ()
       drawLanes nextTime ((thisTime, cs) : rest) = do
         let lanes = Map.toList cs.inner.lanes
@@ -794,7 +795,7 @@ drawDrumPlay glStuff@GLStuff{..} nowTime speed mode dps = do
       drawLights _ [] = return ()
       drawLights ((t, pad) : states) colors = let
         (colorsYes, colorsNo) = partition (\(_, _, pads) -> elem pad pads) colors
-        alpha = 1 - realToFrac (nowTime - t) / gfxConfig.track.targets.secs_light
+        alpha = 1 - realToFrac (nowTime - t) / gl.gfxConfig.track.targets.secs_light
         in when (t > nearTime) $ do
           forM_ colorsYes $ \(i, light, _) -> drawTargetSquare i light alpha
           drawLights states colorsNo
@@ -854,15 +855,15 @@ drawFive glStuff nowTime speed trk = drawFivePlay glStuff nowTime speed GuitarPl
   }
 
 drawFivePlay :: GLStuff -> Double -> Double -> GuitarPlayState Double -> IO ()
-drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
-  glUseProgram objectShader
+drawFivePlay gl nowTime speed gps = do
+  glUseProgram gl.objectShader
   -- view and projection matrices should already have been set
-  let drawObject' = drawObject glStuff
-      globalLight = LightGlobal gfxConfig.track.light
-      nearZ = gfxConfig.track.time.z_past
-      nowZ = gfxConfig.track.time.z_now
-      farZ = gfxConfig.track.time.z_future
-      farTime = nowTime + speed * realToFrac gfxConfig.track.time.secs_future :: Double
+  let draw = drawObject gl
+      globalLight = LightGlobal gl.gfxConfig.track.light
+      nearZ = gl.gfxConfig.track.time.z_past
+      nowZ = gl.gfxConfig.track.time.z_now
+      farZ = gl.gfxConfig.track.time.z_future
+      farTime = nowTime + speed * realToFrac gl.gfxConfig.track.time.secs_future :: Double
       timeToZ t = nowZ + (farZ - nowZ) * realToFrac ((t - nowTime) / (farTime - nowTime))
       zToTime z = nowTime + (farTime - nowTime) * realToFrac ((z - nowZ) / (farZ - nowZ))
       nearTime = zToTime nearZ
@@ -871,9 +872,9 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
         (_, (_, s)) : _ -> s
         _               -> initialGuitarState
       trackWidth
-        = gfxConfig.track.note_area.x_right
-        - gfxConfig.track.note_area.x_left
-      fracToX f = gfxConfig.track.note_area.x_left + trackWidth * f
+        = gl.gfxConfig.track.note_area.x_right
+        - gl.gfxConfig.track.note_area.x_left
+      fracToX f = gl.gfxConfig.track.note_area.x_left + trackWidth * f
       colorCenterX = \case
         Nothing          -> fracToX 0.5
         Just Five.Green  -> fracToX $ 1 / 10
@@ -884,7 +885,7 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
       drawSustain t1 t2 od color
         | t2 <= nowTime = return ()
         | otherwise     = let
-          sc = gfxConfig.objects.sustains.colors
+          sc = gl.gfxConfig.objects.sustains.colors
           boxColor = if od
             then sc.energy
             else case color of
@@ -897,13 +898,13 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
           (x1, x2) = let
             center = colorCenterX color
             halfWidth = 0.5 * case color of
-              Nothing -> gfxConfig.objects.sustains.width.open
-              Just _  -> gfxConfig.objects.sustains.width.fret
+              Nothing -> gl.gfxConfig.objects.sustains.width.open
+              Just _  -> gl.gfxConfig.objects.sustains.width.fret
             in (center - halfWidth, center + halfWidth)
-          y2 = gfxConfig.track.y
-          y1 = y2 + gfxConfig.objects.sustains.height
+          y2 = gl.gfxConfig.track.y
+          y1 = y2 + gl.gfxConfig.objects.sustains.height
           (z1, z2) = (timeToZ $ max nowTime t1, timeToZ t2)
-          in drawObject' Box (ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)) (CSColor boxColor) 1 globalLight
+          in draw Box (ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)) (CSColor boxColor) 1 globalLight
       drawGem t od color sht alpha = let
         (texid, obj) = case (color, sht) of
           (Nothing         , Strum) -> (if od then TextureLongEnergy     else TextureLongOpen    , Model ModelGuitarOpen   )
@@ -926,11 +927,11 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
           (Just Five.Orange, Tap  ) -> (if od then TextureEnergyTap      else TextureOrangeTap   , Model ModelGuitarHOPOTap)
         shade = case alpha of
           Nothing -> CSImage texid
-          Just _  -> CSColor gfxConfig.objects.gems.color_hit
-        posn = ObjectMove $ V3 (colorCenterX color) gfxConfig.track.y z
+          Just _  -> CSColor gl.gfxConfig.objects.gems.color_hit
+        posn = ObjectMove $ V3 (colorCenterX color) gl.gfxConfig.track.y z
         z = timeToZ t
-        in drawObject' obj posn shade (fromMaybe 1 alpha) $ LightOffset
-          $ gfxConfig.objects.gems.light
+        in draw obj posn shade (fromMaybe 1 alpha) $ LightOffset
+          $ gl.gfxConfig.objects.gems.light
       drawNotes _        []                      = return ()
       drawNotes nextTime ((thisTime, cs) : rest) = do
         let notes = Map.toList cs.inner.notes
@@ -942,7 +943,7 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
               ToggleEmpty  -> False
               ToggleEnd () -> False
               _            -> True
-            fadeTime = gfxConfig.objects.gems.secs_fade
+            fadeTime = gl.gfxConfig.objects.gems.secs_fade
         forM_ notes $ \(color, pnf) -> forM_ (getNow pnf) $ \sht ->
           case guitarNoteStatus thisTime gps.events of
             NoteFuture        -> drawGem thisTime thisOD color sht Nothing
@@ -964,37 +965,37 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
             Nothing   -> TextureLine3
           z = timeToZ t
           xyz1 = V3
-            gfxConfig.track.note_area.x_left
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_past)
+            gl.gfxConfig.track.note_area.x_left
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_past)
           xyz2 = V3
-            gfxConfig.track.note_area.x_right
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_future)
-          in drawObject' Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
+            gl.gfxConfig.track.note_area.x_right
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_future)
+          in draw Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
       drawTargetSquare i tex alpha = let
         x1 = fracToX $ i       / 5
         x2 = fracToX $ (i + 1) / 5
-        y = gfxConfig.track.y
-        z1 = gfxConfig.track.targets.z_past
-        z2 = gfxConfig.track.targets.z_future
-        in drawObject' Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
+        y = gl.gfxConfig.track.y
+        z1 = gl.gfxConfig.track.targets.z_past
+        z2 = gl.gfxConfig.track.targets.z_future
+        in draw Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
   -- draw highway
   forM_ (makeToggleBounds nearTime farTime $ fmap (.solo) zoomed) $ \(t1, t2, isSolo) -> do
     let highwayColor
           = (if isSolo then (.solo) else (.normal))
-          $ gfxConfig.track.color
-    drawObject'
+          $ gl.gfxConfig.track.color
+    draw
       Flat
       (ObjectStretch
         (V3
-          gfxConfig.track.note_area.x_left
-          gfxConfig.track.y
+          gl.gfxConfig.track.note_area.x_left
+          gl.gfxConfig.track.y
           (timeToZ t1)
         )
         (V3
-          gfxConfig.track.note_area.x_right
-          gfxConfig.track.y
+          gl.gfxConfig.track.note_area.x_right
+          gl.gfxConfig.track.y
           (timeToZ t2)
         )
       )
@@ -1002,9 +1003,9 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
       1
       globalLight
   -- draw railings
-  let rail = gfxConfig.track.railings
-      noteArea = gfxConfig.track.note_area
-  drawObject' Box
+  let rail = gl.gfxConfig.track.railings
+      noteArea = gl.gfxConfig.track.note_area
+  draw Box
     (ObjectStretch
       (V3
         (noteArea.x_left - rail.x_width)
@@ -1018,7 +1019,7 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
       )
     )
     (CSColor rail.color) 1 globalLight
-  drawObject' Box
+  draw Box
     (ObjectStretch
       (V3
         noteArea.x_right
@@ -1040,7 +1041,7 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
         i = maybe 2 (fromIntegral . fromEnum) (color :: Maybe Five.Color)
         x1 = fracToX $ i       / 5
         x2 = fracToX $ (i + 1) / 5
-        y = gfxConfig.track.y
+        y = gl.gfxConfig.track.y
         z1 = timeToZ startTime
         z2 = timeToZ endTime
         tex = case color of
@@ -1050,7 +1051,7 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
           Just Five.Yellow -> TextureLaneYellow
           Just Five.Blue   -> TextureLaneBlue
           Just Five.Orange -> TextureLaneOrange
-        in drawObject' Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) 1 globalLight
+        in draw Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) 1 globalLight
       drawLanes _        []                      = return ()
       drawLanes nextTime ((thisTime, cs) : rest) = do
         let tremolo = Map.toList cs.inner.tremolo
@@ -1090,24 +1091,24 @@ drawFivePlay glStuff@GLStuff{..} nowTime speed gps = do
   drawNotes farTime $ Map.toDescList zoomed
 
 drawPG :: GLStuff -> Double -> Double -> PG.GtrTuning -> Map.Map Double (CommonState (PGState Double)) -> IO ()
-drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
-  glUseProgram objectShader
+drawPG gl nowTime speed tuning trk = do
+  glUseProgram gl.objectShader
   -- view and projection matrices should already have been set
-  let drawObject' = drawObject glStuff
-      globalLight = LightGlobal gfxConfig.track.light
-      nearZ = gfxConfig.track.time.z_past
-      nowZ = gfxConfig.track.time.z_now
-      farZ = gfxConfig.track.time.z_future
-      farTime = nowTime + speed * realToFrac gfxConfig.track.time.secs_future :: Double
+  let draw = drawObject gl
+      globalLight = LightGlobal gl.gfxConfig.track.light
+      nearZ = gl.gfxConfig.track.time.z_past
+      nowZ = gl.gfxConfig.track.time.z_now
+      farZ = gl.gfxConfig.track.time.z_future
+      farTime = nowTime + speed * realToFrac gl.gfxConfig.track.time.secs_future :: Double
       timeToZ t = nowZ + (farZ - nowZ) * realToFrac ((t - nowTime) / (farTime - nowTime))
       zToTime z = nowTime + (farTime - nowTime) * realToFrac ((z - nowZ) / (farZ - nowZ))
       nearTime = zToTime nearZ
       zoomed = zoomMap nearTime farTime trk
       trackWidth
-        = gfxConfig.track.note_area.x_right
-        - gfxConfig.track.note_area.x_left
-      fracToX f = gfxConfig.track.note_area.x_left + trackWidth * f
-      sc = gfxConfig.objects.sustains.colors
+        = gl.gfxConfig.track.note_area.x_right
+        - gl.gfxConfig.track.note_area.x_left
+      fracToX f = gl.gfxConfig.track.note_area.x_left + trackWidth * f
+      sc = gl.gfxConfig.objects.sustains.colors
       strR = (sc.red   , TextureTargetRed   , TextureTargetRedLight   , TextureRSRed   )
       strY = (sc.yellow, TextureTargetYellow, TextureTargetYellowLight, TextureRSYellow)
       strB = (sc.blue  , TextureTargetBlue  , TextureTargetBlueLight  , TextureRSBlue  )
@@ -1140,12 +1141,12 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
               Just (sustColor, _, _, _) -> sustColor
           (x1, x2) = let
             center = stringCenterX str
-            halfWidth = 0.5 * gfxConfig.objects.sustains.width.fret
+            halfWidth = 0.5 * gl.gfxConfig.objects.sustains.width.fret
             in (center - halfWidth, center + halfWidth)
-          y2 = gfxConfig.track.y
-          y1 = y2 + gfxConfig.objects.sustains.height
+          y2 = gl.gfxConfig.track.y
+          y1 = y2 + gl.gfxConfig.objects.sustains.height
           (z1, z2) = (timeToZ $ max nowTime t1, timeToZ t2)
-          in drawObject' Box (ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)) (CSColor boxColor) 1 globalLight
+          in draw Box (ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)) (CSColor boxColor) 1 globalLight
       drawGem t _od str note alpha = let
         obj = Model ModelPGNote
         fretWidth = 2 / numStrings
@@ -1153,8 +1154,8 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
         (x1, x2) = let
           center = stringCenterX str
           in (center - halfWidth, center + halfWidth)
-        y1 = gfxConfig.track.y - halfWidth
-        y2 = gfxConfig.track.y + halfWidth
+        y1 = gl.gfxConfig.track.y - halfWidth
+        y2 = gl.gfxConfig.track.y + halfWidth
         z = timeToZ t
         (z1, z2) = (z - halfWidth, z + halfWidth)
         stretch = ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)
@@ -1168,9 +1169,9 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
           Tap   -> Just TextureRSTap
         shade = case alpha of
           Nothing -> maybe (CSImage2 texid1 texid2) (CSImage3 texid1 texid2) texid3
-          Just _  -> CSColor gfxConfig.objects.gems.color_hit
-        in drawObject' obj stretch shade (fromMaybe 1 alpha) $ LightOffset $ let
-          normalLight = gfxConfig.objects.gems.light
+          Just _  -> CSColor gl.gfxConfig.objects.gems.color_hit
+        in draw obj stretch shade (fromMaybe 1 alpha) $ LightOffset $ let
+          normalLight = gl.gfxConfig.objects.gems.light
           in normalLight { C.position = V3 0 0 0.5 }
       drawNotes _        []                      = return ()
       drawNotes nextTime ((thisTime, cs) : rest) = do
@@ -1183,7 +1184,7 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
               ToggleEmpty  -> False
               ToggleEnd () -> False
               _            -> True
-            fadeTime = gfxConfig.objects.gems.secs_fade
+            fadeTime = gl.gfxConfig.objects.gems.secs_fade
         forM_ notes $ \(str, pnf) -> forM_ (getNow pnf) $ \note -> if nowTime <= thisTime
           then drawGem thisTime thisOD str note Nothing
           else if nowTime - thisTime < realToFrac fadeTime
@@ -1203,37 +1204,37 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
             Nothing   -> TextureLine3
           z = timeToZ t
           xyz1 = V3
-            gfxConfig.track.note_area.x_left
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_past)
+            gl.gfxConfig.track.note_area.x_left
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_past)
           xyz2 = V3
-            gfxConfig.track.note_area.x_right
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_future)
-          in drawObject' Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
+            gl.gfxConfig.track.note_area.x_right
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_future)
+          in draw Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
       drawTargetSquare i tex alpha = let
         x1 = fracToX $ i       / numStrings
         x2 = fracToX $ (i + 1) / numStrings
-        y = gfxConfig.track.y
-        z1 = gfxConfig.track.targets.z_past
-        z2 = gfxConfig.track.targets.z_future
-        in drawObject' Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
+        y = gl.gfxConfig.track.y
+        z1 = gl.gfxConfig.track.targets.z_past
+        z2 = gl.gfxConfig.track.targets.z_future
+        in draw Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
   -- draw highway
   forM_ (makeToggleBounds nearTime farTime $ fmap (.solo) zoomed) $ \(t1, t2, isSolo) -> do
     let highwayColor
           = (if isSolo then (.solo) else (.normal))
-          $ gfxConfig.track.color
-    drawObject'
+          $ gl.gfxConfig.track.color
+    draw
       Flat
       (ObjectStretch
         (V3
-          gfxConfig.track.note_area.x_left
-          gfxConfig.track.y
+          gl.gfxConfig.track.note_area.x_left
+          gl.gfxConfig.track.y
           (timeToZ t1)
         )
         (V3
-          gfxConfig.track.note_area.x_right
-          gfxConfig.track.y
+          gl.gfxConfig.track.note_area.x_right
+          gl.gfxConfig.track.y
           (timeToZ t2)
         )
       )
@@ -1241,9 +1242,9 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
       1
       globalLight
   -- draw railings
-  let rail = gfxConfig.track.railings
-      noteArea = gfxConfig.track.note_area
-  drawObject' Box
+  let rail = gl.gfxConfig.track.railings
+      noteArea = gl.gfxConfig.track.note_area
+  draw Box
     (ObjectStretch
       (V3
         (noteArea.x_left - rail.x_width)
@@ -1257,7 +1258,7 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
       )
     )
     (CSColor rail.color) 1 globalLight
-  drawObject' Box
+  draw Box
     (ObjectStretch
       (V3
         noteArea.x_right
@@ -1289,7 +1290,7 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
         (colorsYes, colorsNo) = flip partitionMaybe colors $ \(i, (str, (_, _, light, _))) ->
           fmap (\thisAlpha -> (i, light, thisAlpha))
             $ getLightAlpha str
-        alpha = 1 - realToFrac (nowTime - t) / gfxConfig.track.targets.secs_light
+        alpha = 1 - realToFrac (nowTime - t) / gl.gfxConfig.track.targets.secs_light
         in do
           forM_ colorsYes $ \(i, light, thisAlpha) -> drawTargetSquare i light thisAlpha
           drawLights states colorsNo
@@ -1307,24 +1308,24 @@ drawPG glStuff@GLStuff{..} nowTime speed tuning trk = do
 data ManiaColor = ManiaRed | ManiaWhite | ManiaBlack
 
 drawMania :: GLStuff -> Double -> Double -> ManiaChart -> Map.Map Double (CommonState ManiaState) -> IO ()
-drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
-  glUseProgram objectShader
+drawMania gl nowTime speed mchart trk = do
+  glUseProgram gl.objectShader
   -- view and projection matrices should already have been set
-  let drawObject' = drawObject glStuff
-      globalLight = LightGlobal gfxConfig.track.light
-      nearZ = gfxConfig.track.time.z_past
-      nowZ = gfxConfig.track.time.z_now
-      farZ = gfxConfig.track.time.z_future
-      farTime = nowTime + speed * realToFrac gfxConfig.track.time.secs_future :: Double
+  let draw = drawObject gl
+      globalLight = LightGlobal gl.gfxConfig.track.light
+      nearZ = gl.gfxConfig.track.time.z_past
+      nowZ = gl.gfxConfig.track.time.z_now
+      farZ = gl.gfxConfig.track.time.z_future
+      farTime = nowTime + speed * realToFrac gl.gfxConfig.track.time.secs_future :: Double
       timeToZ t = nowZ + (farZ - nowZ) * realToFrac ((t - nowTime) / (farTime - nowTime))
       zToTime z = nowTime + (farTime - nowTime) * realToFrac ((z - nowZ) / (farZ - nowZ))
       nearTime = zToTime nearZ
       zoomed = zoomMap nearTime farTime trk
       trackWidth
-        = gfxConfig.track.note_area.x_right
-        - gfxConfig.track.note_area.x_left
-      fracToX f = gfxConfig.track.note_area.x_left + trackWidth * f
-      sc = gfxConfig.objects.sustains.colors
+        = gl.gfxConfig.track.note_area.x_right
+        - gl.gfxConfig.track.note_area.x_left
+      fracToX f = gl.gfxConfig.track.note_area.x_left + trackWidth * f
+      sc = gl.gfxConfig.objects.sustains.colors
       drawBeat t cs = case cs.beats of
         Nothing -> return ()
         Just e -> let
@@ -1334,14 +1335,14 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
             Nothing   -> TextureLine3
           z = timeToZ t
           xyz1 = V3
-            gfxConfig.track.note_area.x_left
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_past)
+            gl.gfxConfig.track.note_area.x_left
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_past)
           xyz2 = V3
-            gfxConfig.track.note_area.x_right
-            gfxConfig.track.y
-            (z + gfxConfig.track.beats.z_future)
-          in drawObject' Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
+            gl.gfxConfig.track.note_area.x_right
+            gl.gfxConfig.track.y
+            (z + gl.gfxConfig.track.beats.z_future)
+          in draw Flat (ObjectStretch xyz1 xyz2) (CSImage tex) 1 globalLight
       keys = take mchart.keys $ case mchart.style of
         ManiaTurntable -> ManiaRed : cycle [ManiaWhite, ManiaBlack]
         ManiaEncore    -> [ManiaWhite, ManiaWhite] <> repeat ManiaBlack
@@ -1369,12 +1370,12 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
           (x1, x2) = let
             (leftBound, rightBound) = keyBounds key
             center = (leftBound + rightBound) / 2
-            halfWidth = 0.5 * gfxConfig.objects.sustains.width.fret
+            halfWidth = 0.5 * gl.gfxConfig.objects.sustains.width.fret
             in (center - halfWidth, center + halfWidth)
-          y2 = gfxConfig.track.y
-          y1 = y2 + gfxConfig.objects.sustains.height
+          y2 = gl.gfxConfig.track.y
+          y1 = y2 + gl.gfxConfig.objects.sustains.height
           (z1, z2) = (timeToZ $ max nowTime t1, timeToZ t2)
-          in drawObject' Box (ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)) (CSColor boxColor) 1 globalLight
+          in draw Box (ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)) (CSColor boxColor) 1 globalLight
       drawGem t ntype color key alpha = let
         obj = case ntype of
           NoteLift -> Model ModelDrumCymbal
@@ -1390,8 +1391,8 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
           in if isLift
             then (center - half * 0.7, center + half * 0.7)
             else pair
-        y1 = gfxConfig.track.y - reference
-        y2 = gfxConfig.track.y + reference
+        y1 = gl.gfxConfig.track.y - reference
+        y2 = gl.gfxConfig.track.y + reference
         z = timeToZ t
         (z1, z2) = (z - reference, z + reference)
         stretch = ObjectStretch (V3 x1 y1 z1) (V3 x2 y2 z2)
@@ -1410,9 +1411,9 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
           Nothing -> if isLift
             then CSColor $ V4 0.8 0.8 0.8 1
             else CSImage texid
-          Just _  -> CSColor gfxConfig.objects.gems.color_hit
-        in drawObject' obj stretch shade (fromMaybe 1 alpha) $ LightOffset $ let
-          normalLight = gfxConfig.objects.gems.light
+          Just _  -> CSColor gl.gfxConfig.objects.gems.color_hit
+        in draw obj stretch shade (fromMaybe 1 alpha) $ LightOffset $ let
+          normalLight = gl.gfxConfig.objects.gems.light
           in normalLight { C.position = V3 0 0 0.5 }
       drawNotes _        []                      = return ()
       drawNotes nextTime ((thisTime, cs) : rest) = do
@@ -1421,7 +1422,7 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
         forM_ notes $ \(key, pnf) -> forM_ (getFuture pnf) $ \_ntype -> do
           drawSustain thisTime nextTime (keyColor key) key
         -- draw note
-        let fadeTime = gfxConfig.objects.gems.secs_fade
+        let fadeTime = gl.gfxConfig.objects.gems.secs_fade
         forM_ notes $ \(key, pnf) -> forM_ (getNow pnf) $ \ntype -> if nowTime <= thisTime
           then drawGem thisTime ntype (keyColor key) key Nothing
           else if nowTime - thisTime < realToFrac fadeTime
@@ -1434,26 +1435,26 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
         drawNotes thisTime rest
       drawTargetSquare i tex alpha = let
         (x1, x2) = keyBounds i
-        y = gfxConfig.track.y
-        z1 = gfxConfig.track.targets.z_past
-        z2 = gfxConfig.track.targets.z_future
-        in drawObject' Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
+        y = gl.gfxConfig.track.y
+        z1 = gl.gfxConfig.track.targets.z_past
+        z2 = gl.gfxConfig.track.targets.z_future
+        in draw Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) alpha globalLight
   -- draw highway
   forM_ (makeToggleBounds nearTime farTime $ fmap (.solo) zoomed) $ \(t1, t2, isSolo) -> do
     let highwayColor
           = (if isSolo then (.solo) else (.normal))
-          $ gfxConfig.track.color
-    drawObject'
+          $ gl.gfxConfig.track.color
+    draw
       Flat
       (ObjectStretch
         (V3
-          gfxConfig.track.note_area.x_left
-          gfxConfig.track.y
+          gl.gfxConfig.track.note_area.x_left
+          gl.gfxConfig.track.y
           (timeToZ t1)
         )
         (V3
-          gfxConfig.track.note_area.x_right
-          gfxConfig.track.y
+          gl.gfxConfig.track.note_area.x_right
+          gl.gfxConfig.track.y
           (timeToZ t2)
         )
       )
@@ -1461,9 +1462,9 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
       1
       globalLight
   -- draw railings
-  let rail = gfxConfig.track.railings
-      noteArea = gfxConfig.track.note_area
-  drawObject' Box
+  let rail = gl.gfxConfig.track.railings
+      noteArea = gl.gfxConfig.track.note_area
+  draw Box
     (ObjectStretch
       (V3
         (noteArea.x_left - rail.x_width)
@@ -1477,7 +1478,7 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
       )
     )
     (CSColor rail.color) 1 globalLight
-  drawObject' Box
+  draw Box
     (ObjectStretch
       (V3
         noteArea.x_right
@@ -1531,7 +1532,7 @@ drawMania glStuff@GLStuff{..} nowTime speed mchart trk = do
               ManiaWhite -> TextureTargetBlueLight
               ManiaBlack -> TextureTargetPurpleLight
           in fmap (\thisAlpha -> (i, light, thisAlpha)) $ getLightAlpha i
-        alpha = 1 - realToFrac (nowTime - t) / gfxConfig.track.targets.secs_light
+        alpha = 1 - realToFrac (nowTime - t) / gl.gfxConfig.track.targets.secs_light
         in do
           forM_ colorsYes $ \(i, light, thisAlpha) -> drawTargetSquare i light thisAlpha
           drawLights states colorsNo
@@ -1677,9 +1678,9 @@ instance Storable Vertex where
   alignment _ = alignment (undefined :: CFloat)
   peek = undefined -- not implemented
   poke p v = do
-    poke (castPtr p) $ vertexPosition v
-    poke (castPtr p `plusPtr` (3 * sizeOf (undefined :: CFloat))) $ vertexNormal v
-    poke (castPtr p `plusPtr` (6 * sizeOf (undefined :: CFloat))) $ vertexTexCoords v
+    poke (castPtr p) v.vertexPosition
+    poke (castPtr p `plusPtr` (3 * sizeOf (undefined :: CFloat))) v.vertexNormal
+    poke (castPtr p `plusPtr` (6 * sizeOf (undefined :: CFloat))) v.vertexTexCoords
 
 simpleBox :: [Vertex]
 simpleBox = let
@@ -1907,8 +1908,7 @@ updateTexture img tex = liftIO $ do
         (\x y -> pixelAt img x $ imageHeight img - y - 1)
         (imageWidth img)
         (imageHeight img)
-  let texture = textureGL tex
-  glBindTexture GL_TEXTURE_2D texture
+  glBindTexture GL_TEXTURE_2D tex.textureGL
   VS.unsafeWith (imageData flippedVert) $ \p -> do
     glTexSubImage2D GL_TEXTURE_2D 0 0 0
       (fromIntegral $ imageWidth flippedVert)
@@ -1949,13 +1949,13 @@ data FontFace = FontFace
   }
 
 data VideoHandle = VideoHandle
-  { videoFrameLoader :: FrameLoader
-  , videoTexture     :: IORef (Maybe (Double, Texture))
-  , videoFilePath    :: FilePath
+  { frameLoader :: FrameLoader
+  , texture     :: IORef (Maybe (Double, Texture))
+  , filePath    :: FilePath
   }
 
 instance Show VideoHandle where
-  show vh = "VideoHandle[" <> show (videoFilePath vh) <> "]"
+  show vh = "VideoHandle[" <> show vh.filePath <> "]"
 
 data Framebuffers
   = SimpleFramebuffer
@@ -2127,7 +2127,7 @@ sortVertices = let
   getTris (v1 : v2 : v3 : rest) = [v1, v2, v3] : getTris rest
   getTris _                     = []
   getZ (V3 _ _ z) = z
-  sumZ = sum . map (getZ . vertexPosition)
+  sumZ = sum . map (getZ . (.vertexPosition))
   in concatMap snd . sort . map (\tri -> (sumZ tri, tri)) . getTris
 
 loadGLStuff :: (MonadIO m) => Float -> Maybe PreviewSong -> StackTraceT (QueueLog m) GLStuff
@@ -2357,9 +2357,9 @@ loadGLStuff scaleUI previewSong = do
       frameLoader <- stackIO $ forkFrameLoader writeMsg vi
       videoTexRef <- stackIO $ newIORef Nothing
       return $ Just (vi, VideoHandle
-        { videoFrameLoader = frameLoader
-        , videoTexture     = videoTexRef
-        , videoFilePath    = vi.fileVideo
+        { frameLoader = frameLoader
+        , texture     = videoTexRef
+        , filePath    = vi.fileVideo
         })
     _ -> return Nothing
   imageBGs <- fmap (Map.fromList . catMaybes) $ forM (maybe [] (map snd . previewBG) previewSong) $ \case
@@ -2520,12 +2520,12 @@ setFramebufferSize fbufs w h = case fbufs of
     glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_LINEAR
 
 deleteGLStuff :: (MonadIO m) => GLStuff -> m ()
-deleteGLStuff glStuff@GLStuff{..} = liftIO $ do
-  glDeleteProgram objectShader
-  glDeleteProgram quadShader
-  withArrayLen (map objVAO $ [boxObject, flatObject, quadObject] ++ map snd models)
+deleteGLStuff gl = liftIO $ do
+  glDeleteProgram gl.objectShader
+  glDeleteProgram gl.quadShader
+  withArrayLen (map (.objVAO) $ [gl.boxObject, gl.flatObject, gl.quadObject] ++ map snd gl.models)
     $ glDeleteVertexArrays . fromIntegral
-  case framebuffers of
+  case gl.framebuffers of
     MSAAFramebuffers{..} -> do
       withArrayLen [msaaFBO, intermediateFBO] $ glDeleteFramebuffers . fromIntegral
       withArrayLen [msaaFBOTex, intermediateFBOTex] $ glDeleteTextures . fromIntegral
@@ -2534,77 +2534,77 @@ deleteGLStuff glStuff@GLStuff{..} = liftIO $ do
       withArrayLen [simpleFBO] $ glDeleteFramebuffers . fromIntegral
       withArrayLen [simpleFBOTex] $ glDeleteTextures . fromIntegral
       withArrayLen [simpleFBORender] $ glDeleteRenderbuffers . fromIntegral
-  mapM_ (freeTexture . snd) textures
-  mapM_ freeTexture $ Map.elems imageBGs
-  forM_ fontFaces $ \font -> do
+  mapM_ (freeTexture . snd) gl.textures
+  mapM_ freeTexture $ Map.elems gl.imageBGs
+  forM_ gl.fontFaces $ \font -> do
     readIORef font.fontGlyphs >>= mapM_ (freeTexture . snd) . HM.elems
     ft_Done_Face font.fontFace
-  ft_Done_FreeType fontLib
-  stopVideoLoaders glStuff
+  ft_Done_FreeType gl.fontLib
+  stopVideoLoaders gl
 
 stopVideoLoaders :: (MonadIO m) => GLStuff -> m ()
-stopVideoLoaders GLStuff{..} = liftIO $ do
-  forM_ (Map.elems videoBGs) $ \vh -> frameMessage (videoFrameLoader vh) CloseLoader
+stopVideoLoaders gl = liftIO $ do
+  forM_ (Map.elems gl.videoBGs) $ \vh -> frameMessage vh.frameLoader CloseLoader
 
 data WindowDims = WindowDims Int Int
 
 drawTextureFade :: GLStuff -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
-drawTextureFade glstuff = drawTexture' glstuff $ let
-  fade = (gfxConfig glstuff).view.track_fade
+drawTextureFade gl = drawTexture' gl $ let
+  fade = gl.gfxConfig.view.track_fade
   in (fade.bottom, fade.top)
 
 drawTexture :: GLStuff -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
-drawTexture glstuff = drawTexture' glstuff (1, 1)
+drawTexture gl = drawTexture' gl (1, 1)
 
 drawTexture' :: GLStuff -> (Float, Float) -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
-drawTexture' GLStuff{..} (fadeBottom, fadeTop) (WindowDims screenW screenH) (Texture tex w h) maybeColor (V2 x y) scale = do
-  glUseProgram quadShader
+drawTexture' gl (fadeBottom, fadeTop) (WindowDims screenW screenH) (Texture tex w h) maybeColor (V2 x y) scale = do
+  glUseProgram gl.quadShader
   glActiveTexture GL_TEXTURE0
   checkGL "glBindTexture" $ glBindTexture GL_TEXTURE_2D tex
-  glBindVertexArray $ objVAO quadObject
+  glBindVertexArray gl.quadObject.objVAO
   let scaleX = fromIntegral (w * scale) / fromIntegral screenW
       scaleY = fromIntegral (h * scale) / fromIntegral screenH
       translateX = (fromIntegral x / fromIntegral screenW) * 2 - 1 + scaleX
       translateY = (fromIntegral y / fromIntegral screenH) * 2 - 1 + scaleY
-  sendUniformName quadShader "transform"
+  sendUniformName gl.quadShader "transform"
     (   translate4 (V3 translateX translateY 0)
     !*! L.scaled (V4 scaleX scaleY 1 1)
     :: M44 Float
     )
-  sendUniformName quadShader "inResolution" $ V2
+  sendUniformName gl.quadShader "inResolution" $ V2
     (fromIntegral (w * scale) :: Float)
     (fromIntegral (h * scale) :: Float)
-  sendUniformName quadShader "startFade" fadeBottom
-  sendUniformName quadShader "endFade" fadeTop
-  sendUniformName quadShader "doFXAA" fxaaEnabled
+  sendUniformName gl.quadShader "startFade" fadeBottom
+  sendUniformName gl.quadShader "endFade" fadeTop
+  sendUniformName gl.quadShader "doFXAA" gl.fxaaEnabled
   case maybeColor of
-    Nothing -> sendUniformName quadShader "colorMode" (2 :: GLuint)
+    Nothing -> sendUniformName gl.quadShader "colorMode" (2 :: GLuint)
     Just color -> do
-      sendUniformName quadShader "colorMode" (1 :: GLuint)
-      sendUniformName quadShader "color" color
-  checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES (objVertexCount quadObject) GL_UNSIGNED_INT nullPtr
+      sendUniformName gl.quadShader "colorMode" (1 :: GLuint)
+      sendUniformName gl.quadShader "color" color
+  checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES gl.quadObject.objVertexCount GL_UNSIGNED_INT nullPtr
 
 drawColor :: GLStuff -> WindowDims -> RenderObject -> V2 Int -> V2 Int -> V4 Float -> IO ()
-drawColor GLStuff{..} (WindowDims screenW screenH) object (V2 x y) (V2 w h) color = do
-  glUseProgram quadShader
-  glBindVertexArray $ objVAO object
+drawColor gl (WindowDims screenW screenH) object (V2 x y) (V2 w h) color = do
+  glUseProgram gl.quadShader
+  glBindVertexArray object.objVAO
   let scaleX = fromIntegral w / fromIntegral screenW
       scaleY = fromIntegral h / fromIntegral screenH
       translateX = (fromIntegral x / fromIntegral screenW) * 2 - 1 + scaleX
       translateY = (fromIntegral y / fromIntegral screenH) * 2 - 1 + scaleY
-  sendUniformName quadShader "transform"
+  sendUniformName gl.quadShader "transform"
     (   translate4 (V3 translateX translateY 0)
     !*! L.scaled (V4 scaleX scaleY 1 1)
     :: M44 Float
     )
-  sendUniformName quadShader "inResolution" $ V2
+  sendUniformName gl.quadShader "inResolution" $ V2
     (fromIntegral w :: Float)
     (fromIntegral h :: Float)
-  sendUniformName quadShader "startFade" (1 :: Float)
-  sendUniformName quadShader "endFade" (1 :: Float)
-  sendUniformName quadShader "colorMode" (0 :: GLuint)
-  sendUniformName quadShader "color" color
-  checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES (objVertexCount object) GL_UNSIGNED_INT nullPtr
+  sendUniformName gl.quadShader "startFade" (1 :: Float)
+  sendUniformName gl.quadShader "endFade" (1 :: Float)
+  sendUniformName gl.quadShader "colorMode" (0 :: GLuint)
+  sendUniformName gl.quadShader "color" color
+  checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES object.objVertexCount GL_UNSIGNED_INT nullPtr
 
 backgroundBoxRadius :: Int
 backgroundBoxRadius = 10
@@ -2657,11 +2657,11 @@ data BackgroundMode
   | BackgroundFit  -- preserve aspect ratio, texture is drawn no bigger than screen (may be boxed)
 
 drawBackground :: GLStuff -> WindowDims -> BackgroundMode -> Texture -> IO ()
-drawBackground GLStuff{..} (WindowDims screenW screenH) mode (Texture tex w h) = do
-  glUseProgram quadShader
+drawBackground gl (WindowDims screenW screenH) mode (Texture tex w h) = do
+  glUseProgram gl.quadShader
   glActiveTexture GL_TEXTURE0
   checkGL "glBindTexture" $ glBindTexture GL_TEXTURE_2D tex
-  glBindVertexArray $ objVAO quadObject
+  glBindVertexArray gl.quadObject.objVAO
   let textureRatio = fromIntegral w       / fromIntegral h       :: Float
       screenRatio  = fromIntegral screenW / fromIntegral screenH :: Float
       scaleX = case mode of
@@ -2678,13 +2678,13 @@ drawBackground GLStuff{..} (WindowDims screenW screenH) mode (Texture tex w h) =
         BackgroundFit -> if textureRatio > screenRatio
           then screenRatio / textureRatio -- TODO check
           else 1
-  sendUniformName quadShader "transform"
+  sendUniformName gl.quadShader "transform"
     (L.scaled (V4 scaleX scaleY 1 1) :: M44 Float)
-  sendUniformName quadShader "startFade" (1 :: Float)
-  sendUniformName quadShader "endFade" (1 :: Float)
-  sendUniformName quadShader "doFXAA" False
-  sendUniformName quadShader "colorMode" (2 :: GLuint)
-  checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES (objVertexCount quadObject) GL_UNSIGNED_INT nullPtr
+  sendUniformName gl.quadShader "startFade" (1 :: Float)
+  sendUniformName gl.quadShader "endFade" (1 :: Float)
+  sendUniformName gl.quadShader "doFXAA" False
+  sendUniformName gl.quadShader "colorMode" (2 :: GLuint)
+  checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES gl.quadObject.objVertexCount GL_UNSIGNED_INT nullPtr
 
 freeTexture :: (MonadIO m) => Texture -> m ()
 freeTexture (Texture tex _ _) = liftIO $ with tex $ glDeleteTextures 1
@@ -2736,24 +2736,24 @@ splitSpace trks heightWidthRatio (WindowDims w h) = let
   in (zip vocalSpaces vocals, zip highwaySpaces highways)
 
 setUpTrackView :: GLStuff -> WindowDims -> IO (M44 Float)
-setUpTrackView GLStuff{..} (WindowDims w h) = do
+setUpTrackView gl (WindowDims w h) = do
   glClear GL_DEPTH_BUFFER_BIT
-  glUseProgram objectShader
-  let viewPosn = gfxConfig.view.camera.position
-      tiltDown = gfxConfig.view.camera.rotate
+  glUseProgram gl.objectShader
+  let viewPosn = gl.gfxConfig.view.camera.position
+      tiltDown = gl.gfxConfig.view.camera.rotate
       view, projection :: M44 Float
       view
         = L.mkTransformation (L.axisAngle (V3 1 0 0) (degrees tiltDown)) 0
         !*! translate4 (negate viewPosn)
         -- note, this translates then rotates (can't just give V3 to mkTransformation)
       projection = L.perspective
-        (degrees gfxConfig.view.camera.fov)
+        (degrees gl.gfxConfig.view.camera.fov)
         (fromIntegral w / fromIntegral h)
-        gfxConfig.view.camera.near
-        gfxConfig.view.camera.far
-  sendUniformName objectShader "view" view
-  sendUniformName objectShader "projection" projection
-  sendUniformName objectShader "viewPos" viewPosn
+        gl.gfxConfig.view.camera.near
+        gl.gfxConfig.view.camera.far
+  sendUniformName gl.objectShader "view" view
+  sendUniformName gl.objectShader "projection" projection
+  sendUniformName gl.objectShader "viewPos" viewPosn
   return $ projection !*! view
 
 drawDrumPlayFull
@@ -2764,21 +2764,21 @@ drawDrumPlayFull
   -> [EliteDrumLayoutHint]
   -> EliteDrumPlayState Double
   -> IO ()
-drawDrumPlayFull glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed layout dps = do
+drawDrumPlayFull gl dims@(WindowDims wWhole hWhole) time speed layout dps = do
   glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
-  case gfxConfig.view.background of
+  case gl.gfxConfig.view.background of
     V4 r g b a -> glClearColor r g b a
   glClear GL_COLOR_BUFFER_BIT
 
   glDepthFunc GL_LESS
-  void $ setUpTrackView glStuff dims
-  drawEliteDrumPlay glStuff time speed layout dps
+  void $ setUpTrackView gl dims
+  drawEliteDrumPlay gl time speed layout dps
 
   glDepthFunc GL_ALWAYS
   let tdgs = case dps.events of
         (_, (_, s)) : _ -> s
         _               -> initialEDState
-  drawTimeBox glStuff dims
+  drawTimeBox gl dims
     [ "Score: " <> T.pack (show tdgs.score)
     , "Combo: " <> T.pack (show tdgs.combo)
     ]
@@ -2790,21 +2790,21 @@ drawFivePlayFull
   -> Double
   -> GuitarPlayState Double
   -> IO ()
-drawFivePlayFull glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed gps = do
+drawFivePlayFull gl dims@(WindowDims wWhole hWhole) time speed gps = do
   glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
-  case gfxConfig.view.background of
+  case gl.gfxConfig.view.background of
     V4 r g b a -> glClearColor r g b a
   glClear GL_COLOR_BUFFER_BIT
 
   glDepthFunc GL_LESS
-  void $ setUpTrackView glStuff dims
-  drawFivePlay glStuff time speed gps
+  void $ setUpTrackView gl dims
+  drawFivePlay gl time speed gps
 
   glDepthFunc GL_ALWAYS
   let ggs = case gps.events of
         (_, (_, s)) : _ -> s
         _               -> initialGuitarState
-  drawTimeBox glStuff dims
+  drawTimeBox gl dims
     [ "Score: " <> T.pack (show ggs.score)
     , "Combo: " <> T.pack (show ggs.combo)
     , "Accuracy: " <> let
@@ -2861,7 +2861,7 @@ drawTextLine glStuff dims chars penStart = let
   drawLoop _   [] = return ()
   drawLoop pen (((gsr, tex), maybeColor) : rest) = do
     let penOffset  = fromIntegral <$> V2 (gsrBitmap_left gsr) (gsrBitmap_top gsr)
-        penOffsetH = V2 0 (negate $ textureHeight tex)
+        penOffsetH = V2 0 (negate tex.textureHeight)
         penAdvance = fromIntegral . (`shiftR` 6) <$> V2 (vX $ gsrAdvance gsr) (vY $ gsrAdvance gsr)
     drawTexture glStuff dims tex maybeColor (pen + penOffset + penOffsetH) 1
     drawLoop (pen + penAdvance) rest
@@ -2877,8 +2877,8 @@ drawTimeBox gl dims@(WindowDims _ hWhole) timeLines = do
   let maxTextWidth = foldr max 0 $ map (sum . map (vX . gsrAdvance . fst)) texLines
       boxWidth = 2 * margin + fromIntegral (maxTextWidth `shiftR` 6)
       boxHeight = (margin + fontSize) * length texLines + margin
-      margin   = round $ fromIntegral gl.gfxConfig.text.timeBox.margin * scaleUI gl
-      fontSize = round $ fromIntegral gl.gfxConfig.text.timeBox.size   * scaleUI gl
+      margin   = round $ fromIntegral gl.gfxConfig.text.timeBox.margin * gl.scaleUI
+      fontSize = round $ fromIntegral gl.gfxConfig.text.timeBox.size   * gl.scaleUI
       backgroundColor = V4 0 0 0 0.5
   drawBackgroundBox gl dims
     (V2 0 (hWhole - boxHeight))
@@ -2898,12 +2898,12 @@ drawTracks
   -> [EliteDrumLayoutHint]
   -> [(T.Text, PreviewTrack)]
   -> IO ()
-drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg userLayout trks = do
+drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks = do
   glBindFramebuffer GL_FRAMEBUFFER 0
   glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
   case bg of
     Just _  -> glClearColor 0 0 0 255
-    Nothing -> case gfxConfig.view.background of
+    Nothing -> case gl.gfxConfig.view.background of
       V4 r g b a -> glClearColor r g b a
   glClear GL_COLOR_BUFFER_BIT
 
@@ -2911,28 +2911,28 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
 
   -- TODO should allow user choice between fit and fill background modes
   forM_ bg $ \case
-    PreviewBGVideo vi -> case Map.lookup vi videoBGs of
-      Just VideoHandle{..} -> do
+    PreviewBGVideo vi -> case Map.lookup vi gl.videoBGs of
+      Just videoHandle -> do
         -- TODO maybe separate out the timestamp updates from drawing
-        frameMessage videoFrameLoader $ RequestFrame time
-        mtex <- getFrame videoFrameLoader >>= \case
+        frameMessage videoHandle.frameLoader $ RequestFrame time
+        mtex <- getFrame videoHandle.frameLoader >>= \case
           Nothing -> return Nothing
-          Just (timeNew, image) -> readIORef videoTexture >>= \case
+          Just (timeNew, image) -> readIORef videoHandle.texture >>= \case
             Nothing -> do
               tex <- loadTexture True image
-              writeIORef videoTexture $ Just (timeNew, tex)
+              writeIORef videoHandle.texture $ Just (timeNew, tex)
               return $ Just tex
             Just (timeCurrent, tex) -> do
               when (timeNew /= timeCurrent) $ do
                 updateTexture image tex
-                writeIORef videoTexture $ Just (timeNew, tex)
+                writeIORef videoHandle.texture $ Just (timeNew, tex)
               return $ Just tex
-        forM_ mtex $ drawBackground glStuff dims BackgroundFit
+        forM_ mtex $ drawBackground gl dims BackgroundFit
       Nothing -> return ()
-    PreviewBGImage f -> forM_ (Map.lookup f imageBGs) $ drawBackground glStuff dims BackgroundFit
+    PreviewBGImage f -> forM_ (Map.lookup f gl.imageBGs) $ drawBackground gl dims BackgroundFit
 
   glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
-  forM_ previewSong $ \psong -> let
+  forM_ gl.previewSong $ \psong -> let
     songLength = U.applyTempoMap (previewTempo psong) $ timingEnd $ previewTiming psong
     currentBeats = U.unapplyTempoMap (previewTempo psong) (realToFrac time :: U.Seconds)
     currentMB = showPosition (previewMeasures psong) currentBeats
@@ -2946,48 +2946,48 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
       | bpmMilli < 1000 = 1
       | otherwise       = 0
     bpmString = "BPM:" <> replicate bpmNumSpaces ' ' <> show bpmMilli
-    in drawTimeBox glStuff dims $
+    in drawTimeBox gl dims $
       [ showTimestamp (realToFrac time) <> " / " <> showTimestamp songLength
       , T.pack $ currentMB <> " / " <> lengthMB
       , T.pack bpmString
       ] <> toList (fmap snd $ Map.lookupLE time $ previewSections psong)
 
   let (vocalSpaces, highwaySpaces) = splitSpace trks
-        gfxConfig.view.height_width_ratio
+        gl.gfxConfig.view.height_width_ratio
         dims
 
   forM_ vocalSpaces $ \(space, (_name, trk)) -> checkGL "draw vocals" $ case trk of
-    PreviewVocal m -> drawLyrics glStuff dims space time m
+    PreviewVocal m -> drawLyrics gl dims space time m
     _              -> return () -- shouldn't happen
 
   glDepthFunc GL_LESS
   glClear GL_DEPTH_BUFFER_BIT
 
   mvps <- forM highwaySpaces $ \((x, y, w, h), (_name, trk)) -> checkGL "draw" $ do
-    glBindFramebuffer GL_FRAMEBUFFER $ case framebuffers of
+    glBindFramebuffer GL_FRAMEBUFFER $ case gl.framebuffers of
       SimpleFramebuffer{..} -> simpleFBO
       MSAAFramebuffers{..}  -> msaaFBO
-    setFramebufferSize framebuffers
+    setFramebufferSize gl.framebuffers
       (fromIntegral w) (fromIntegral h)
     glViewport 0 0 (fromIntegral w) (fromIntegral h)
     glClearColor 0 0 0 0
     glClear GL_COLOR_BUFFER_BIT
-    mvp <- setUpTrackView glStuff (WindowDims w h)
+    mvp <- setUpTrackView gl (WindowDims w h)
     case trk of
-      PreviewDrums        mode m -> drawDrums      glStuff time speed mode                   m
-      PreviewDrumsElite layout m -> drawEliteDrums glStuff time speed (userLayout <> layout) m
-      PreviewFive              m -> drawFive       glStuff time speed                        m
-      PreviewPG              t m -> drawPG         glStuff time speed t                      m
-      PreviewMania           p m -> drawMania      glStuff time speed p                      m
+      PreviewDrums        mode m -> drawDrums      gl time speed mode                   m
+      PreviewDrumsElite layout m -> drawEliteDrums gl time speed (userLayout <> layout) m
+      PreviewFive              m -> drawFive       gl time speed                        m
+      PreviewPG              t m -> drawPG         gl time speed t                      m
+      PreviewMania           p m -> drawMania      gl time speed p                      m
       PreviewVocal             _ -> return () -- shouldn't happen
 
-    case framebuffers of
+    case gl.framebuffers of
       SimpleFramebuffer{..} -> do
 
         glBindFramebuffer GL_FRAMEBUFFER 0
         glClear GL_DEPTH_BUFFER_BIT
         glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
-        drawTextureFade glStuff dims (Texture simpleFBOTex w h) Nothing (V2 x y) 1
+        drawTextureFade gl dims (Texture simpleFBOTex w h) Nothing (V2 x y) 1
 
       MSAAFramebuffers{..} -> do
 
@@ -3001,7 +3001,7 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
         glBindFramebuffer GL_FRAMEBUFFER 0
         glClear GL_DEPTH_BUFFER_BIT
         glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
-        drawTextureFade glStuff dims (Texture intermediateFBOTex w h) Nothing (V2 x y) 1
+        drawTextureFade gl dims (Texture intermediateFBOTex w h) Nothing (V2 x y) 1
 
     return mvp
 
@@ -3009,10 +3009,10 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
 
   glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
   forM_ (zip highwaySpaces mvps) $ \(((x, y, w, h), (name, _trk)), mvp) -> checkGL "draw track label" $ do
-    texLine <- prepareText glStuff (.trackLabel) name
+    texLine <- prepareText gl (.trackLabel) name
 
     -- use view/projection matrix to get pixel position of the closer edge of the strikeline
-    let V4 _ nowY _ nowW = mvp L.!* V4 0 gfxConfig.track.y gfxConfig.track.targets.z_past 1
+    let V4 _ nowY _ nowW = mvp L.!* V4 0 gl.gfxConfig.track.y gl.gfxConfig.track.targets.z_past 1
         ndcY             = nowY / nowW
         strikeY          = round $ (ndcY + 1) * 0.5 * fromIntegral h :: Int
 
@@ -3023,16 +3023,16 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
         boxY      = y + quot (strikeY - boxHeight) 2
         textX     = boxX + margin
         textY     = boxY + margin
-        margin    = round $ fromIntegral gfxConfig.text.trackLabel.margin * scaleUI
-        fontSize  = round $ fromIntegral gfxConfig.text.trackLabel.size   * scaleUI
+        margin    = round $ fromIntegral gl.gfxConfig.text.trackLabel.margin * gl.scaleUI
+        fontSize  = round $ fromIntegral gl.gfxConfig.text.trackLabel.size   * gl.scaleUI
 
-    drawBackgroundBox glStuff dims
+    drawBackgroundBox gl dims
       (V2 boxX boxY)
       (V2 boxWidth boxHeight)
       (V4 0 0 0 0.5)
       backgroundBoxRadius
       [TL, TR, BL, BR]
-    drawTextLine glStuff dims (map (, Nothing) texLine) (V2 textX textY)
+    drawTextLine gl dims (map (, Nothing) texLine) (V2 textX textY)
 
 checkGL :: (MonadIO m) => String -> m a -> m a
 checkGL s f = do
