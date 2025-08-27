@@ -410,19 +410,46 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
         lyrics = PNF.makeSustainView (.timeStart) (.timeEnd) lyricList
 
         phrasesDouble :: [(Double, Double)]
-        phrasesDouble
-          = map (\(t, ((), (), len)) -> (beatsToDouble t, beatsToDouble (t + len)))
-          $ ATB.toPairList
-          $ RTB.toAbsoluteEventList 0
-          $ joinEdgesSimple
-          $ fmap (\b -> if b then EdgeOn () () else EdgeOff ())
-          $ thisSrc.vocalPhrase1
+        phrasesDouble = let
+          withBools
+            = ATB.toPairList
+            . RTB.toAbsoluteEventList 0
+            . joinEdgesSimple
+            . fmap (\b -> if b then EdgeOn () () else EdgeOff ())
+          in map (\(t, ((), (), len)) -> (beatsToDouble t, beatsToDouble (t + len)))
+            $ Set.toAscList
+            $ Set.fromList (withBools thisSrc.vocalPhrase1) <> Set.fromList (withBools thisSrc.vocalPhrase2)
+            -- TODO probably make this more resilient so P1 and P2 phrases don't have to exactly coincide
         phrases :: [(Double, PNF.SustainView (Double, Double))]
         phrases = PNF.makeSustainView fst snd phrasesDouble
 
-    return $ (\(((((a, b), c), d), e), f) -> PNF.CommonState (PNF.VocalState a b) c d e f) <$> do
+        notesList :: [PNF.VocalTube Double]
+        notesList = let
+          go _         []                                 = []
+          go prevPitch ((start, (lyricNote, end)) : rest) = case lyricNote of
+            Pitched p     _ -> PNF.VocalTube
+              { timeStart = start
+              , pitches = Right (p, p)
+              , timeEnd = end
+              } : go (Just p) rest
+            Talky   tdiff _ -> PNF.VocalTube
+              { timeStart = start
+              , pitches = Left tdiff
+              , timeEnd = end
+              } : go Nothing rest
+            SlideTo p       -> PNF.VocalTube
+              { timeStart = start
+              , pitches = Right (fromMaybe p prevPitch, p)
+              , timeEnd = end
+              } : go (Just p) rest
+          in go Nothing lyricNotesDouble
+        notes :: [(Double, PNF.SustainView (PNF.VocalTube Double))]
+        notes = PNF.makeSustainView (.timeStart) (.timeEnd) notesList
+
+    return $ (\((((((a, b), c), d), e), f), g) -> PNF.CommonState (PNF.VocalState a b c) d e f g) <$> do
       Map.fromList lyrics
         `PNF.zipStateMaps` Map.fromList phrases
+        `PNF.zipStateMaps` Map.fromList notes
         `PNF.zipStateMaps` Map.empty
         `PNF.zipStateMaps` Map.empty
         `PNF.zipStateMaps` Map.empty

@@ -10,6 +10,7 @@ module Onyx.Game.Graphics.Config where
 import           Control.Monad.Codec
 import           Data.Char           (toUpper)
 import           Data.List           (elemIndex)
+import qualified Data.Text           as T
 import           Linear              (V3 (..), V4 (..))
 import           Onyx.Codec.Common
 import           Onyx.Codec.JSON
@@ -48,6 +49,7 @@ data Config = Config
   { view    :: View
   , track   :: Track
   , objects :: Objects
+  , text    :: TextConfig
   } deriving (Show)
 
 instance StackJSON Config where
@@ -55,6 +57,7 @@ instance StackJSON Config where
     view    <- (.view   ) =. req "view"    stackJSON
     track   <- (.track  ) =. req "track"   stackJSON
     objects <- (.objects) =. req "objects" stackJSON
+    text    <- (.text   ) =. req "text"    stackJSON
     return Config{..}
 
 data View = View
@@ -284,3 +287,29 @@ instance StackJSON SustainWidth where
     open <- (.open) =. req "open" stackJSON
     fret <- (.fret) =. req "fret" stackJSON
     return SustainWidth{..}
+
+data TextConfig = TextConfig
+  { timeBox    :: FontConfig
+  , trackLabel :: FontConfig
+  , lyrics     :: FontConfig
+  } deriving (Show)
+
+instance StackJSON TextConfig where
+  stackJSON = asObject "TextConfig" $ do
+    timeBox    <- (.timeBox   ) =. req "time-box"    stackJSON
+    trackLabel <- (.trackLabel) =. req "track-label" stackJSON
+    lyrics     <- (.lyrics    ) =. req "lyrics"      stackJSON
+    return TextConfig{..}
+
+data FontConfig = FontConfig
+  { font   :: T.Text
+  , size   :: Int
+  , margin :: Int
+  } deriving (Show)
+
+instance StackJSON FontConfig where
+  stackJSON = asObject "FontConfig" $ do
+    font   <- (.font  ) =. req "font"   stackJSON
+    size   <- (.size  ) =. req "size"   stackJSON
+    margin <- (.margin) =. req "margin" stackJSON
+    return FontConfig{..}

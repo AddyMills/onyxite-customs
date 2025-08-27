@@ -1576,8 +1576,8 @@ drawLyrics gl dims (x, y, w, h) nowTime vocals = let
   pastText = (if T.null futureText then T.strip else T.stripStart) $ joinText past
   in unless (T.null pastText && T.null futureText) $ do
 
-    pastTextures <- prepareText gl pastText
-    futureTextures <- prepareText gl futureText
+    pastTextures <- prepareText gl (.lyrics) pastText
+    futureTextures <- prepareText gl (.lyrics) futureText
 
     let pastColor = V4 (255 / 255) (231 / 255) (83 / 255) 1
         coloredTextures = map (, Just pastColor) pastTextures <> map (, Nothing) futureTextures
@@ -1589,8 +1589,8 @@ drawLyrics gl dims (x, y, w, h) nowTime vocals = let
         boxY      = y + quot (h - boxHeight) 2
         textX     = boxX + margin
         textY     = boxY + margin
-        margin    = round $ 10 * gl.scaleUI
-        fontSize  = round $ 15 * gl.scaleUI
+        margin    = round $ fromIntegral gl.gfxConfig.text.lyrics.margin * gl.scaleUI
+        fontSize  = round $ fromIntegral gl.gfxConfig.text.lyrics.size   * gl.scaleUI
 
     drawBackgroundBox gl dims
       (V2 boxX boxY)
@@ -1937,11 +1937,15 @@ data GLStuff = GLStuff
   , videoBGs      :: Map.Map (VideoInfo FilePath) VideoHandle
   , imageBGs      :: Map.Map FilePath Texture
   , fontLib       :: FT_Library
-  , fontFace      :: FT_Face
-  , fontSlot      :: FT_GlyphSlot
-  , fontGlyphs    :: IORef (HM.HashMap Char (FT_GlyphSlotRec, Texture))
+  , fontFaces     :: Map.Map (T.Text, Int) FontFace
   , previewSong   :: Maybe PreviewSong
   , scaleUI       :: Float -- TODO allow changing this during runtime
+  }
+
+data FontFace = FontFace
+  { fontFace   :: FT_Face
+  , fontSlot   :: FT_GlyphSlot
+  , fontGlyphs :: IORef (HM.HashMap Char (FT_GlyphSlotRec, Texture))
   }
 
 data VideoHandle = VideoHandle
@@ -2368,13 +2372,18 @@ loadGLStuff scaleUI previewSong = do
         return $ Just (f, tex)
     _ -> return Nothing
 
-  -- font
+  -- fonts
   fontLib <- stackIO ft_Init_FreeType
-  fontPath <- stackIO $ getResourcesPath "diffusion-bold.ttf"
-  fontFace <- stackIO $ ft_New_Face fontLib fontPath 0
-  stackIO $ ft_Set_Char_Size fontFace (15 * 64) 0 (round $ 72 * scaleUI) 0
-  fontSlot <- stackIO $ frGlyph <$> peek fontFace
-  fontGlyphs <- stackIO $ newIORef HM.empty
+  let allFonts = Map.fromList $ do
+        fontConfig <- [gfxConfig.text.timeBox, gfxConfig.text.trackLabel, gfxConfig.text.lyrics]
+        return ((fontConfig.font, fontConfig.size), ())
+  fontFaces <- flip Map.traverseWithKey allFonts $ \(filename, size) () -> do
+    fontPath <- stackIO $ getResourcesPath $ "fonts" </> T.unpack filename
+    fontFace <- stackIO $ ft_New_Face fontLib fontPath 0
+    stackIO $ ft_Set_Char_Size fontFace (fromIntegral size * 64) 0 (round $ 72 * scaleUI) 0
+    fontSlot <- stackIO $ frGlyph <$> peek fontFace
+    fontGlyphs <- stackIO $ newIORef HM.empty
+    return FontFace{..}
 
   return GLStuff{..}
 
@@ -2527,7 +2536,10 @@ deleteGLStuff glStuff@GLStuff{..} = liftIO $ do
       withArrayLen [simpleFBORender] $ glDeleteRenderbuffers . fromIntegral
   mapM_ (freeTexture . snd) textures
   mapM_ freeTexture $ Map.elems imageBGs
-  readIORef fontGlyphs >>= mapM_ (freeTexture . snd) . HM.elems
+  forM_ fontFaces $ \font -> do
+    readIORef font.fontGlyphs >>= mapM_ (freeTexture . snd) . HM.elems
+    ft_Done_Face font.fontFace
+  ft_Done_FreeType fontLib
   stopVideoLoaders glStuff
 
 stopVideoLoaders :: (MonadIO m) => GLStuff -> m ()
@@ -2807,33 +2819,37 @@ drawFivePlayFull glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed 
           in T.pack (show (round (acc * 1000) :: Int)) <> " ms"
     ]
 
-getGlyph :: GLStuff -> Char -> IO (Maybe (FT_GlyphSlotRec, Texture))
-getGlyph GLStuff{..} c = do
-  table <- readIORef fontGlyphs
-  case HM.lookup c table of
-    Just pair -> return $ Just pair
-    Nothing   -> do
-      ft_Load_Char fontFace (fromIntegral $ fromEnum c) FT_LOAD_RENDER
-      gsr <- peek fontSlot
-      case bPixel_mode $ gsrBitmap gsr of
-        FT_PIXEL_MODE_GRAY -> do
-          let w = bWidth $ gsrBitmap gsr
-              h = bRows $ gsrBitmap gsr
-          fptr <- newForeignPtr_ $ bBuffer $ gsrBitmap gsr
-          v <- VS.freeze $ MV.unsafeFromForeignPtr0 fptr $ fromIntegral $ w * h
-          tex <- loadTexture False $ pixelMap (PixelRGBA8 255 255 255) $ Image
-            { imageWidth  = fromIntegral w
-            , imageHeight = fromIntegral h
-            , imageData   = v
-            }
-          writeIORef fontGlyphs $ HM.insert c (gsr, tex) table
-          return $ Just (gsr, tex)
-        _ -> do
-          putStrLn "freetype output isn't FT_PIXEL_MODE_GRAY"
-          return Nothing
+getGlyph :: GLStuff -> (C.TextConfig -> C.FontConfig) -> Char -> IO (Maybe (FT_GlyphSlotRec, Texture))
+getGlyph gl getFontConfig c = let
+  fontConfig = getFontConfig gl.gfxConfig.text
+  in case Map.lookup (fontConfig.font, fontConfig.size) gl.fontFaces of
+    Nothing   -> return Nothing
+    Just font -> do
+      table <- readIORef font.fontGlyphs
+      case HM.lookup c table of
+        Just pair -> return $ Just pair
+        Nothing   -> do
+          ft_Load_Char font.fontFace (fromIntegral $ fromEnum c) FT_LOAD_RENDER
+          gsr <- peek font.fontSlot
+          case bPixel_mode $ gsrBitmap gsr of
+            FT_PIXEL_MODE_GRAY -> do
+              let w = bWidth $ gsrBitmap gsr
+                  h = bRows $ gsrBitmap gsr
+              fptr <- newForeignPtr_ $ bBuffer $ gsrBitmap gsr
+              v <- VS.freeze $ MV.unsafeFromForeignPtr0 fptr $ fromIntegral $ w * h
+              tex <- loadTexture False $ pixelMap (PixelRGBA8 255 255 255) $ Image
+                { imageWidth  = fromIntegral w
+                , imageHeight = fromIntegral h
+                , imageData   = v
+                }
+              writeIORef font.fontGlyphs $ HM.insert c (gsr, tex) table
+              return $ Just (gsr, tex)
+            _ -> do
+              putStrLn "freetype output isn't FT_PIXEL_MODE_GRAY"
+              return Nothing
 
-prepareText :: GLStuff -> T.Text -> IO [(FT_GlyphSlotRec, Texture)]
-prepareText glStuff = fmap catMaybes . mapM (getGlyph glStuff) . T.unpack
+prepareText :: GLStuff -> (C.TextConfig -> C.FontConfig) -> T.Text -> IO [(FT_GlyphSlotRec, Texture)]
+prepareText glStuff getFontConfig = fmap catMaybes . mapM (getGlyph glStuff getFontConfig) . T.unpack
 
 drawTextLine
   :: GLStuff
@@ -2856,22 +2872,22 @@ drawTimeBox
   -> WindowDims
   -> [T.Text]
   -> IO ()
-drawTimeBox glStuff dims@(WindowDims _ hWhole) timeLines = do
-  texLines <- mapM (prepareText glStuff) timeLines
+drawTimeBox gl dims@(WindowDims _ hWhole) timeLines = do
+  texLines <- mapM (prepareText gl (.timeBox)) timeLines
   let maxTextWidth = foldr max 0 $ map (sum . map (vX . gsrAdvance . fst)) texLines
       boxWidth = 2 * margin + fromIntegral (maxTextWidth `shiftR` 6)
       boxHeight = (margin + fontSize) * length texLines + margin
-      margin = round $ 10 * scaleUI glStuff
-      fontSize = round $ 15 * scaleUI glStuff
+      margin   = round $ fromIntegral gl.gfxConfig.text.timeBox.margin * scaleUI gl
+      fontSize = round $ fromIntegral gl.gfxConfig.text.timeBox.size   * scaleUI gl
       backgroundColor = V4 0 0 0 0.5
-  drawBackgroundBox glStuff dims
+  drawBackgroundBox gl dims
     (V2 0 (hWhole - boxHeight))
     (V2 boxWidth boxHeight)
     backgroundColor
     backgroundBoxRadius
     [BR]
   forM_ (zip [1..] texLines) $ \(i, texLine) -> do
-    drawTextLine glStuff dims (map (, Nothing) texLine) $ V2 margin $ hWhole - (margin + fontSize) * i
+    drawTextLine gl dims (map (, Nothing) texLine) $ V2 margin $ hWhole - (margin + fontSize) * i
 
 drawTracks
   :: GLStuff
@@ -2993,7 +3009,7 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
 
   glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
   forM_ (zip highwaySpaces mvps) $ \(((x, y, w, h), (name, _trk)), mvp) -> checkGL "draw track label" $ do
-    texLine <- prepareText glStuff name
+    texLine <- prepareText glStuff (.trackLabel) name
 
     -- use view/projection matrix to get pixel position of the closer edge of the strikeline
     let V4 _ nowY _ nowW = mvp L.!* V4 0 gfxConfig.track.y gfxConfig.track.targets.z_past 1
@@ -3007,8 +3023,8 @@ drawTracks glStuff@GLStuff{..} dims@(WindowDims wWhole hWhole) time speed bg use
         boxY      = y + quot (strikeY - boxHeight) 2
         textX     = boxX + margin
         textY     = boxY + margin
-        margin    = round $ 10 * scaleUI
-        fontSize  = round $ 15 * scaleUI
+        margin    = round $ fromIntegral gfxConfig.text.trackLabel.margin * scaleUI
+        fontSize  = round $ fromIntegral gfxConfig.text.trackLabel.size   * scaleUI
 
     drawBackgroundBox glStuff dims
       (V2 boxX boxY)

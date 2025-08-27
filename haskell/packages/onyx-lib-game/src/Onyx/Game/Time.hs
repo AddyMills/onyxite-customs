@@ -202,6 +202,7 @@ newtype ManiaState = ManiaState
 data VocalState t = VocalState
   { lyrics  :: SustainView (LyricSyllable t)
   , phrases :: SustainView (t, t)
+  , notes   :: SustainView (VocalTube t)
   } deriving (Show, Generic)
     deriving (TimeState) via GenericTimeState (VocalState t)
 
@@ -246,6 +247,12 @@ data LyricSyllable t = LyricSyllable
   { timeStart :: t
   , lyric     :: Lyric
   , talky     :: Maybe TalkyDifficulty
+  , timeEnd   :: t
+  } deriving (Show)
+
+data VocalTube t = VocalTube
+  { timeStart :: t
+  , pitches   :: Either TalkyDifficulty (Pitch, Pitch)
   , timeEnd   :: t
   } deriving (Show)
 

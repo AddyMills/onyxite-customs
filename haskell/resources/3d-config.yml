@@ -99,3 +99,17 @@ objects:
       fret: 0.2
     # Y distance raised off the track floor
     height: 0.02
+
+text:
+  time-box:
+    font: "diffusion-bold.ttf"
+    size: 15
+    margin: 10
+  track-label:
+    font: "Saira-SemiBold.ttf"
+    size: 17
+    margin: 8
+  lyrics:
+    font: "Saira-SemiBold.ttf"
+    size: 20
+    margin: 10
