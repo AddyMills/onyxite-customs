@@ -9,7 +9,6 @@ library
   hs-source-dirs:
     src
   ghc-options: -Wall
-  build-tools: c2hs
   build-depends:
       base
     , conduit-audio
@@ -22,6 +21,7 @@ library
     , stm
     , containers
     , split
+    , inline-c
   default-language: Haskell2010
   pkgconfig-depends:
       libavutil
@@ -30,7 +30,3 @@ library
     , libswscale
     , libavfilter
     , libswresample
-  c-sources:
-    cbits/ffmacros.c
-  include-dirs:
-    cbits

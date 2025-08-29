@@ -183,7 +183,7 @@ forkFrameLoader logger vi = do
             <*> frame_data frameRGBA
             <*> frame_linesize frameRGBA
           p <- stackIO $ frame_data frameRGBA >>= peek
-          fptr <- stackIO $ newForeignPtr_ $ (castPtr :: Ptr CUChar -> Ptr Word8) p
+          fptr <- stackIO $ newForeignPtr_ p
           v <- stackIO $ V.freeze $ MV.unsafeFromForeignPtr0 fptr $ fromIntegral $ w * h * 4
           return P.Image
             { P.imageWidth = fromIntegral w
