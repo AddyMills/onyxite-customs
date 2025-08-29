@@ -16,6 +16,7 @@ import           Control.Monad.Trans.Resource
 import           Data.Fixed                   (mod')
 import           Data.IORef
 import           Data.Maybe                   (fromMaybe)
+import           Data.StateVar                (($=))
 import qualified Data.Vector.Storable         as V
 import qualified Data.Vector.Storable.Mutable as MV
 import           Foreign                      hiding (void)
@@ -64,24 +65,24 @@ forkFrameLoader logger vi = do
     check_ "avformat_find_stream_info" (>= 0) $ avformat_find_stream_info ctx nullPtr
     stackIO $ withCString videoPath $ \pvid -> av_dump_format ctx 0 pvid 0
     videoStreams <- stackIO $ getStreams ctx >>= filterM (\stream -> do
-      params <- stream_codecpar stream
-      (AVMEDIA_TYPE_VIDEO ==) <$> codec_type params)
+      params <- stream.codecpar
+      (AVMEDIA_TYPE_VIDEO ==) <$> params.codec_type)
     stream <- case videoStreams of
       [s] -> return s
       s : _ : _ -> do
         warn "Multiple video streams; picking the first one"
         return s
       [] -> fatal "No video streams found"
-    streamIndex <- stackIO $ stream_index stream
-    params <- stackIO $ stream_codecpar stream
-    codec <- stackIO $ codec_id params >>= avcodec_find_decoder
-    w <- stackIO $ cp_width params
-    h <- stackIO $ cp_height params
-    (num, den) <- stackIO $ stream_time_base stream
+    streamIndex <- stackIO stream.index
+    params <- stackIO stream.codecpar
+    codec <- stackIO $ params.codec_id >>= avcodec_find_decoder
+    w <- stackIO params.width
+    h <- stackIO params.height
+    (num, den) <- stackIO stream.time_base
     let resolution = realToFrac num / realToFrac den :: Double
-    duration <- stackIO $ avfc_duration ctx
+    duration <- stackIO $ durationSeconds ctx
     -- this is usually 0, but have seen a small offset in .mpg files
-    startOffset <- stackIO $ fromMaybe 0 <$> avfc_start_time ctx
+    startOffset <- stackIO $ fromMaybe 0 <$> startTimeSeconds ctx
     let videoStart = maybe 0 realToFrac vi.videoStartTime
         videoEnd = maybe duration realToFrac vi.videoEndTime
         playLength = videoEnd - videoStart
@@ -91,15 +92,15 @@ forkFrameLoader logger vi = do
     frame <- res av_frame_alloc $ \f -> with f av_frame_free
     frameRGBA <- res av_frame_alloc $ \f -> with f av_frame_free
     packet <- res av_packet_alloc $ \p -> with p av_packet_free
-    pfmt <- stackIO $ pix_fmt cctx
-    outData <- stackIO $ frame_data frameRGBA
-    outLinesize <- stackIO $ frame_linesize frameRGBA
+    pfmt <- stackIO cctx.pix_fmt
+    outData <- stackIO frameRGBA.extended_data
+    outLinesize <- stackIO frameRGBA.linesize
     checkRes "av_image_alloc (output)" (>= 0)
       (av_image_alloc outData outLinesize w h AV_PIX_FMT_RGBA 16)
       (av_freep outData)
-    stackIO $ frame_set_width frameRGBA w
-    stackIO $ frame_set_height frameRGBA h
-    stackIO $ frame_set_format frameRGBA AV_PIX_FMT_RGBA
+    stackIO $ frameRGBA.width $= w
+    stackIO $ frameRGBA.height $= h
+    stackIO $ frameRGBA.format $= AV_PIX_FMT_RGBA
     sws_ctx <- stackIO $ sws_getContext
       w
       h
@@ -153,7 +154,7 @@ forkFrameLoader logger vi = do
           if codePacket < 0
             then return Nothing -- probably reached end of file
             else do
-              packetIndex <- stackIO $ packet_stream_index packet
+              packetIndex <- stackIO packet.stream_index
               if streamIndex /= packetIndex
                 then do
                   -- not a packet for the video stream, probably audio
@@ -166,7 +167,7 @@ forkFrameLoader logger vi = do
                   if codeFrame < 0
                     then readFrame wantPTS -- no image received yet, need more packets
                     else do
-                      pts <- stackIO $ frame_pts frame
+                      pts <- stackIO frame.pts
                       if pts >= wantPTS
                         then do
                           img <- convertImage -- image ready to go!
@@ -176,13 +177,13 @@ forkFrameLoader logger vi = do
         convertImage = do
           check_ "sws_scale" (>= 0) $ join $ sws_scale
             <$> pure sws_ctx
-            <*> frame_data frame
-            <*> frame_linesize frame
+            <*> frame.extended_data
+            <*> frame.linesize
             <*> pure 0
             <*> pure h
-            <*> frame_data frameRGBA
-            <*> frame_linesize frameRGBA
-          p <- stackIO $ frame_data frameRGBA >>= peek
+            <*> frameRGBA.extended_data
+            <*> frameRGBA.linesize
+          p <- stackIO $ frameRGBA.extended_data >>= peek
           fptr <- stackIO $ newForeignPtr_ p
           v <- stackIO $ V.freeze $ MV.unsafeFromForeignPtr0 fptr $ fromIntegral $ w * h * 4
           return P.Image

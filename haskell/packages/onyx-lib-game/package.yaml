@@ -45,3 +45,4 @@ library:
   - freetype2
   - split
   - extra
+  - StateVar
