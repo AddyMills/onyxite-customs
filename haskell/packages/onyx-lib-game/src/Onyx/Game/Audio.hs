@@ -5,6 +5,7 @@
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE TypeApplications    #-}
 module Onyx.Game.Audio
 ( projectAudio, withAL, AudioHandle(..)
 , playSource
@@ -14,8 +15,8 @@ import           Control.Concurrent           (threadDelay)
 import           Control.Concurrent.Async     (async, forConcurrently,
                                                mapConcurrently_)
 import           Control.Concurrent.MVar
-import           Control.Exception            (bracket)
-import           Control.Monad                (forM, forM_, join)
+import           Control.Exception            (SomeException, bracket, try)
+import           Control.Monad                (forM, forM_, join, when)
 import           Control.Monad.IO.Class       (MonadIO, liftIO)
 import           Control.Monad.Trans.Resource
 import           Data.Conduit                 (runConduit, (.|))
@@ -82,15 +83,27 @@ addWaveformSamples :: IORef (V.Vector Float, Int) -> V.Vector Float -> IO ()
 addWaveformSamples bufRef samples = do
   (buf, pos) <- readIORef bufRef
   let samplesLen = V.length samples
-      newPos = (pos + samplesLen) `mod` waveformBufferSize
-      -- Split samples if they wrap around the buffer
-      (samples1, samples2) = if pos + samplesLen <= waveformBufferSize
-        then (samples, V.empty)
-        else V.splitAt (waveformBufferSize - pos) samples
-      -- Update buffer
-      buf1 = buf V.// zip [pos..] (V.toList samples1)
-      buf2 = if V.null samples2 then buf1 else buf1 V.// zip [0..] (V.toList samples2)
-  writeIORef bufRef (buf2, newPos)
+  if samplesLen == 0 || pos < 0 || pos >= V.length buf
+    then return ()  -- Nothing to add or invalid state
+    else do
+      let newPos = (pos + samplesLen) `mod` waveformBufferSize
+      if pos + samplesLen <= waveformBufferSize
+        then do
+          -- Simple case: no wraparound
+          let indices = [pos .. pos + samplesLen - 1]
+              updates = zip indices (V.toList samples)
+          writeIORef bufRef (buf V.// updates, newPos)
+        else do
+          -- Wraparound case: split into two parts
+          let firstPartLen = waveformBufferSize - pos
+              (samples1, samples2) = V.splitAt firstPartLen samples
+              indices1 = [pos .. waveformBufferSize - 1]
+              indices2 = [0 .. V.length samples2 - 1]
+              updates1 = zip indices1 (V.toList samples1)
+              updates2 = zip indices2 (V.toList samples2)
+              buf1 = buf V.// updates1
+              buf2 = buf1 V.// updates2
+          writeIORef bufRef (buf2, newPos)
 
 -- | Get current waveform data
 getWaveformData :: IORef (V.Vector Float, Int) -> IO (V.Vector Float)
@@ -103,11 +116,20 @@ getWaveformData bufRef = do
 -- | Convert Int16 stereo samples to mono Float samples, normalized to [-1,1]
 stereoInt16ToMonoFloat :: V.Vector Int16 -> V.Vector Float
 stereoInt16ToMonoFloat samples
+  | V.length samples < 2 = V.empty  -- Need at least 2 samples for stereo
   | V.length samples `mod` 2 /= 0 = V.empty
-  | otherwise = V.generate (V.length samples `div` 2) $ \i -> let
-      l = fromIntegral (samples V.! (i * 2)) / 32768.0
-      r = fromIntegral (samples V.! (i * 2 + 1)) / 32768.0
-      in (l + r) / 2.0
+  | otherwise = let
+      samplesLen = V.length samples
+      outputLen = samplesLen `div` 2
+      in V.generate outputLen $ \i -> let
+        leftIdx = i * 2
+        rightIdx = leftIdx + 1
+        in if rightIdx < samplesLen
+          then let
+            l = fromIntegral (samples V.! leftIdx) / 32768.0
+            r = fromIntegral (samples V.! rightIdx) / 32768.0
+            in (l + r) / 2.0
+          else 0.0  -- Fallback, though this shouldn't happen with proper math
 
 _sndSecsSpeed :: (MonadResource m) => Double -> Maybe Double -> FilePath -> IO (CA.AudioSource m Int16)
 _sndSecsSpeed pos mspeed f = do
@@ -286,7 +308,9 @@ readySourceWithWaveform pans vols initGain ca waveformBuf = do
                       [] -> return ()
                       (firstChan : _) -> do
                         let waveformSamples = stereoInt16ToMonoFloat firstChan
-                        addWaveformSamples waveformBuf waveformSamples
+                        -- Use try to prevent waveform issues from blocking audio
+                        _ <- try @SomeException $ addWaveformSamples waveformBuf waveformSamples
+                        return ()
                     forM_ (zip bufs grouped) $ \(buf, chan') -> do
                       liftIO $ V.unsafeWith chan' $ \p -> do
                         let _ = p :: Ptr Int16

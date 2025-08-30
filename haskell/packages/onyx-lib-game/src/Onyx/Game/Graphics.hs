@@ -3064,10 +3064,13 @@ drawWaveform gl (WindowDims wWhole hWhole) waveformData = do
     let samplesPerPixel = max 1 $ numSamples `div` waveformWidth
         centerY = waveformY + waveformHeight `div` 2
         maxHeight = fromIntegral waveformHeight / 2.0 - 5  -- Leave some margin
+        actualWidth = min waveformWidth numSamples  -- Don't exceed available samples
     
-    forM_ [0 .. waveformWidth - 1] $ \i -> do
-      let sampleIdx = i * samplesPerPixel
-      when (sampleIdx < numSamples) $ do
+    forM_ [0 .. actualWidth - 1] $ \i -> do
+      let sampleIdx = if samplesPerPixel == 1 
+                      then i  -- Direct mapping when samplesPerPixel is 1
+                      else min (i * samplesPerPixel) (numSamples - 1)  -- Ensure bounds
+      when (sampleIdx >= 0 && sampleIdx < numSamples) $ do
         let sample = waveformData VS.! sampleIdx
             sampleHeight = abs sample * maxHeight
             lineTop = centerY - round sampleHeight
