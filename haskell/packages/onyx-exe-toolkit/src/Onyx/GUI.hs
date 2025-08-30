@@ -73,6 +73,7 @@ import           Data.Monoid                               (Endo (..))
 import qualified Data.Text                                 as T
 import qualified Data.Text.Encoding                        as TE
 import           Data.Time.Clock.System                    (SystemTime (..))
+import qualified Data.Vector.Storable                      as VS
 import           Data.Version                              (showVersion)
 import           Data.Word                                 (Word32)
 import           Foreign                                   (Ptr, alloca,
@@ -917,6 +918,7 @@ launchWindow sink makeMenuBar proj song maybeAudio albumArt isRB = mdo
       (return song)
       (currentSongTime <$> getTimeMonotonic <*> readIORef varTime)
       getSpeed
+      ((\state -> playAudioHandle <$> songPlaying state) <$> readIORef varTime)
     FL.setResizable tab $ Just groupGL
     let takeState = takeMVar varState
         putState ss = do
@@ -934,6 +936,7 @@ launchWindow sink makeMenuBar proj song maybeAudio albumArt isRB = mdo
           let dummyHandle = AudioHandle
                 { audioStop = return ()
                 , audioSetGain = \_ -> return ()
+                , audioWaveform = return VS.empty
                 }
           handle <- case maybeAudio of
             Just f  -> do
@@ -3300,8 +3303,9 @@ previewGroup
   -> IO PreviewSong
   -> IO Double
   -> IO Double
+  -> IO (Maybe AudioHandle)  -- ^ Get current audio handle
   -> IO (FL.Ref FL.Group, IO (), IO ())
-previewGroup sink rect getSong getTime getSpeed = do
+previewGroup sink rect getSong getTime getSpeed getAudioHandle = do
   let (glArea, bottomControlsArea) = chopBottom 40 rect
       [partSelectHalf, bgSelectHalf] = splitHorizN 2 bottomControlsArea
       partSelectArea = trimClock 6 7 6 14 partSelectHalf
@@ -3375,9 +3379,11 @@ previewGroup sink rect getSong getTime getSpeed = do
           w <- FL.pixelW wind
           h <- FL.pixelH wind
           let flatTrks = concat trks
+          -- Get current audio handle for waveform visualization
+          mAudioHandle <- getAudioHandle
           RGGraphics.drawTracks stuff (RGGraphics.WindowDims w h) t speed bg (prefEliteLayout ?preferences)
-            $ flip mapMaybe selected
-            $ \name -> (name,) <$> lookup name flatTrks
+            (flip mapMaybe selected $ \name -> (name,) <$> lookup name flatTrks)
+            mAudioHandle
   -- TODO add an option to use `FLTK.setUseHighResGL True`
   -- This appears to always be forced true on hidpi Linux. Not sure of Windows.
   -- But on Mac by default I believe the GL resolution is non-retina unless you set this.
@@ -3450,6 +3456,7 @@ _launchPreview sink makeMenuBar mid = mdo
       getTracks
       (readIORef varTime)
       (return 1)
+      (return Nothing)  -- No audio handle in time server mode
 
     stopServer <- _launchTimeServer
       sink

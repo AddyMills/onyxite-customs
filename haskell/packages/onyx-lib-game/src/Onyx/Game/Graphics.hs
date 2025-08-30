@@ -50,6 +50,7 @@ import qualified Linear                       as L
 import qualified Onyx.Amplitude.File          as Amp
 import           Onyx.Build.RB3CH             (BasicTiming (..))
 import           Onyx.Codec.JSON              (loadYaml)
+import           Onyx.Game.Audio              (AudioHandle (..))
 import qualified Onyx.Game.Graphics.Config    as C
 import           Onyx.Game.Graphics.Video
 import           Onyx.Game.Time
@@ -2897,8 +2898,9 @@ drawTracks
   -> (Maybe PreviewBG)
   -> [EliteDrumLayoutHint]
   -> [(T.Text, PreviewTrack)]
+  -> Maybe AudioHandle
   -> IO ()
-drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks = do
+drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAudioHandle = do
   glBindFramebuffer GL_FRAMEBUFFER 0
   glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
   case bg of
@@ -3033,6 +3035,52 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks = do
       backgroundBoxRadius
       [TL, TR, BL, BR]
     drawTextLine gl dims (map (, Nothing) texLine) (V2 textX textY)
+
+  -- Draw waveform visualization
+  forM_ mAudioHandle $ \audioHandle -> checkGL "draw waveform" $ do
+    waveformData <- audioWaveform audioHandle
+    unless (VS.null waveformData) $ do
+      drawWaveform gl dims waveformData
+
+drawWaveform :: GLStuff -> WindowDims -> VS.Vector Float -> IO ()
+drawWaveform gl (WindowDims wWhole hWhole) waveformData = do
+  -- Position waveform at top-right corner
+  let waveformWidth = 300
+      waveformHeight = 80
+      waveformX = wWhole - waveformWidth - 20
+      waveformY = 20
+      numSamples = VS.length waveformData
+      
+  -- Draw background
+  drawBackgroundBox gl (WindowDims wWhole hWhole)
+    (V2 waveformX waveformY)
+    (V2 waveformWidth waveformHeight)
+    (V4 0 0 0 0.7)  -- Semi-transparent black background
+    5  -- Corner radius
+    [TL, TR, BL, BR]
+  
+  -- Draw waveform samples as vertical lines
+  when (numSamples > 0) $ do
+    let samplesPerPixel = max 1 $ numSamples `div` waveformWidth
+        centerY = waveformY + waveformHeight `div` 2
+        maxHeight = fromIntegral waveformHeight / 2.0 - 5  -- Leave some margin
+    
+    forM_ [0 .. waveformWidth - 1] $ \i -> do
+      let sampleIdx = i * samplesPerPixel
+      when (sampleIdx < numSamples) $ do
+        let sample = waveformData VS.! sampleIdx
+            sampleHeight = abs sample * maxHeight
+            lineTop = centerY - round sampleHeight
+            lineBottom = centerY + round sampleHeight
+            lineX = waveformX + i
+        
+        -- Draw vertical line representing the waveform sample
+        drawBackgroundBox gl (WindowDims wWhole hWhole)
+          (V2 lineX lineTop)
+          (V2 1 (lineBottom - lineTop + 1))
+          (V4 0.2 0.8 0.2 0.8)  -- Green color
+          0  -- No corner radius for thin lines
+          []
 
 checkGL :: (MonadIO m) => String -> m a -> m a
 checkGL s f = do

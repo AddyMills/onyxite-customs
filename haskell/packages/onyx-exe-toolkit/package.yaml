@@ -60,6 +60,7 @@ executables:
     - onyx-lib
     - onyx-lib-game
     - onyx-handle
+    - vector
 
     ghc-options: -threaded -O -with-rtsopts=-N
 

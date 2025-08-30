@@ -69,6 +69,46 @@ checkAL desc f = withMVar lockAL $ \() -> do
 doAL :: String -> IO a -> IO a
 doAL _ f = f
 
+-- | Waveform buffer size (samples)
+waveformBufferSize :: Int
+waveformBufferSize = 2048
+
+-- | Create a circular buffer for waveform data
+newWaveformBuffer :: IO (IORef (V.Vector Float, Int))
+newWaveformBuffer = newIORef (V.replicate waveformBufferSize 0, 0)
+
+-- | Add samples to the waveform buffer (circular)
+addWaveformSamples :: IORef (V.Vector Float, Int) -> V.Vector Float -> IO ()
+addWaveformSamples bufRef samples = do
+  (buf, pos) <- readIORef bufRef
+  let samplesLen = V.length samples
+      newPos = (pos + samplesLen) `mod` waveformBufferSize
+      -- Split samples if they wrap around the buffer
+      (samples1, samples2) = if pos + samplesLen <= waveformBufferSize
+        then (samples, V.empty)
+        else V.splitAt (waveformBufferSize - pos) samples
+      -- Update buffer
+      buf1 = buf V.// zip [pos..] (V.toList samples1)
+      buf2 = if V.null samples2 then buf1 else buf1 V.// zip [0..] (V.toList samples2)
+  writeIORef bufRef (buf2, newPos)
+
+-- | Get current waveform data
+getWaveformData :: IORef (V.Vector Float, Int) -> IO (V.Vector Float)
+getWaveformData bufRef = do
+  (buf, pos) <- readIORef bufRef
+  -- Return buffer arranged from current position (oldest first)
+  let (newer, older) = V.splitAt pos buf
+  return $ older V.++ newer
+
+-- | Convert Int16 stereo samples to mono Float samples, normalized to [-1,1]
+stereoInt16ToMonoFloat :: V.Vector Int16 -> V.Vector Float
+stereoInt16ToMonoFloat samples
+  | V.length samples `mod` 2 /= 0 = V.empty
+  | otherwise = V.generate (V.length samples `div` 2) $ \i -> let
+      l = fromIntegral (samples V.! (i * 2)) / 32768.0
+      r = fromIntegral (samples V.! (i * 2 + 1)) / 32768.0
+      in (l + r) / 2.0
+
 _sndSecsSpeed :: (MonadResource m) => Double -> Maybe Double -> FilePath -> IO (CA.AudioSource m Int16)
 _sndSecsSpeed pos mspeed f = do
   src <- sourceSndFrom (CA.Seconds pos) f
@@ -122,8 +162,9 @@ foreign import ccall unsafe
   alSourcei :: AL.ALuint -> AL.ALenum -> AL.ALint -> IO ()
 
 data AudioHandle = AudioHandle
-  { audioStop    :: IO ()
-  , audioSetGain :: Float -> IO ()
+  { audioStop       :: IO ()
+  , audioSetGain    :: Float -> IO ()
+  , audioWaveform   :: IO (V.Vector Float) -- ^ Get recent waveform data (mono, normalized -1 to 1)
   }
 
 data AssignedSource
@@ -144,14 +185,16 @@ playSources
   -> [([Float], [Float], CA.AudioSource (ResourceT IO) Int16)]
   -> IO AudioHandle
 playSources initGain inputs = do
+  globalWaveform <- newWaveformBuffer
   readies <- forConcurrently inputs $ \(pans, vols, ca) -> do
-    readySource pans vols initGain ca
+    readySourceWithWaveform pans vols initGain ca globalWaveform
   mapConcurrently_ sourceWait readies
   doAL "playSources play" $ AL.play $ concatMap sourceAL readies
   let handles = map sourceHandle readies
   return AudioHandle
-    { audioStop    = mapConcurrently_ audioStop handles
-    , audioSetGain = \g -> mapConcurrently_ (\h -> audioSetGain h g) handles
+    { audioStop     = mapConcurrently_ audioStop handles
+    , audioSetGain  = \g -> mapConcurrently_ (\h -> audioSetGain h g) handles
+    , audioWaveform = getWaveformData globalWaveform
     }
 
 playSource
@@ -161,7 +204,8 @@ playSource
   -> CA.AudioSource (ResourceT IO) Int16
   -> IO AudioHandle
 playSource pans vols initGain ca = do
-  ready <- readySource pans vols initGain ca
+  localWaveform <- newWaveformBuffer
+  ready <- readySourceWithWaveform pans vols initGain ca localWaveform
   sourceWait ready
   doAL "playSource play" $ AL.play $ sourceAL ready
   return $ sourceHandle ready
@@ -173,6 +217,17 @@ readySource
   -> CA.AudioSource (ResourceT IO) Int16
   -> IO ReadySource
 readySource pans vols initGain ca = do
+  dummyWaveform <- newWaveformBuffer
+  readySourceWithWaveform pans vols initGain ca dummyWaveform
+
+readySourceWithWaveform
+  :: [Float] -- ^ channel pans, -1 (L) to 1 (R)
+  -> [Float] -- ^ channel volumes, in decibels
+  -> Float -- ^ initial gain, 0 to 1
+  -> CA.AudioSource (ResourceT IO) Int16
+  -> IORef (V.Vector Float, Int) -- ^ waveform buffer to update
+  -> IO ReadySource
+readySourceWithWaveform pans vols initGain ca waveformBuf = do
   let assigned = assignSources pans vols
       srcCount = length assigned
       floatRate = realToFrac $ CA.rate ca
@@ -226,6 +281,12 @@ readySource pans vols initGain ca = do
                           interleaved = CA.interleave [c1, c2]
                           in interleaved : groupChannels xs ys
                         groupChannels _ _ = []
+                    -- Capture waveform data: mix all channels together for visualization
+                    liftIO $ case grouped of
+                      [] -> return ()
+                      (firstChan : _) -> do
+                        let waveformSamples = stereoInt16ToMonoFloat firstChan
+                        addWaveformSamples waveformBuf waveformSamples
                     forM_ (zip bufs grouped) $ \(buf, chan') -> do
                       liftIO $ V.unsafeWith chan' $ \p -> do
                         let _ = p :: Ptr Int16
@@ -257,8 +318,9 @@ readySource pans vols initGain ca = do
     { sourceWait = takeMVar firstFull
     , sourceAL   = srcs
     , sourceHandle = AudioHandle
-      { audioStop = writeIORef stopper True >> takeMVar stopped
-      , audioSetGain = setGain
+      { audioStop     = writeIORef stopper True >> takeMVar stopped
+      , audioSetGain  = setGain
+      , audioWaveform = getWaveformData waveformBuf
       }
     }
 
