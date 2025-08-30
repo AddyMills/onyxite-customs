@@ -83,27 +83,42 @@ addWaveformSamples :: IORef (V.Vector Float, Int) -> V.Vector Float -> IO ()
 addWaveformSamples bufRef samples = do
   (buf, pos) <- readIORef bufRef
   let samplesLen = V.length samples
-  if samplesLen == 0 || pos < 0 || pos >= V.length buf
-    then return ()  -- Nothing to add or invalid state
+      bufLen = V.length buf
+      -- Limit samples to buffer size to prevent overflow
+      maxSamplesToAdd = min samplesLen bufLen
+      samplesToAdd = V.take maxSamplesToAdd samples
+      actualSamplesLen = V.length samplesToAdd
+  -- Debug info
+  when (samplesLen > 0) $ do
+    putStrLn $ "addWaveformSamples: original samplesLen=" ++ show samplesLen ++ " limited to=" ++ show actualSamplesLen ++ " pos=" ++ show pos ++ " bufLen=" ++ show bufLen
+  if actualSamplesLen == 0 || pos < 0 || pos >= bufLen
+    then do
+      when (samplesLen > 0) $ putStrLn "addWaveformSamples: Early return due to invalid state"
+      return ()  -- Nothing to add or invalid state
     else do
-      let newPos = (pos + samplesLen) `mod` waveformBufferSize
-      if pos + samplesLen <= waveformBufferSize
+      let newPos = (pos + actualSamplesLen) `mod` waveformBufferSize
+      if pos + actualSamplesLen <= waveformBufferSize
         then do
           -- Simple case: no wraparound
-          let indices = [pos .. pos + samplesLen - 1]
-              updates = zip indices (V.toList samples)
-          writeIORef bufRef (buf V.// updates, newPos)
+          let indices = [pos .. pos + actualSamplesLen - 1]
+          putStrLn $ "addWaveformSamples: Simple case, indices range: " ++ show (head indices) ++ ".." ++ show (last indices) ++ " (bufLen=" ++ show bufLen ++ ")"
+          let updates = zip indices (V.toList samplesToAdd)
+              newBuf = buf V.// updates
+          -- Force evaluation of the new vector
+          seq (V.length newBuf) $ writeIORef bufRef (newBuf, newPos)
         else do
           -- Wraparound case: split into two parts
           let firstPartLen = waveformBufferSize - pos
-              (samples1, samples2) = V.splitAt firstPartLen samples
+              (samples1, samples2) = V.splitAt firstPartLen samplesToAdd
               indices1 = [pos .. waveformBufferSize - 1]
               indices2 = [0 .. V.length samples2 - 1]
-              updates1 = zip indices1 (V.toList samples1)
+          putStrLn $ "addWaveformSamples: Wrap case, indices1: " ++ show (head indices1) ++ ".." ++ show (last indices1) ++ ", indices2: " ++ show (if null indices2 then "empty" else show (head indices2) ++ ".." ++ show (last indices2)) ++ " (bufLen=" ++ show bufLen ++ ")"
+          let updates1 = zip indices1 (V.toList samples1)
               updates2 = zip indices2 (V.toList samples2)
               buf1 = buf V.// updates1
               buf2 = buf1 V.// updates2
-          writeIORef bufRef (buf2, newPos)
+          -- Force evaluation of the new vector
+          seq (V.length buf2) $ writeIORef bufRef (buf2, newPos)
 
 -- | Get current waveform data
 getWaveformData :: IORef (V.Vector Float, Int) -> IO (V.Vector Float)
@@ -309,7 +324,12 @@ readySourceWithWaveform pans vols initGain ca waveformBuf = do
                       (firstChan : _) -> do
                         let waveformSamples = stereoInt16ToMonoFloat firstChan
                         -- Use try to prevent waveform issues from blocking audio
-                        _ <- try @SomeException $ addWaveformSamples waveformBuf waveformSamples
+                        -- Force evaluation inside the exception handler
+                        _ <- try @SomeException $ do
+                          addWaveformSamples waveformBuf waveformSamples
+                          -- Force evaluation by reading back the buffer
+                          (newBuf, _) <- readIORef waveformBuf
+                          seq (V.length newBuf) (return ())
                         return ()
                     forM_ (zip bufs grouped) $ \(buf, chan') -> do
                       liftIO $ V.unsafeWith chan' $ \p -> do
