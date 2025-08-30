@@ -278,6 +278,10 @@ readySourceWithWaveform pans vols initGain ca waveformBuf = do
       srcCount = length assigned
       floatRate = realToFrac $ CA.rate ca
   srcs <- doAL "playSource genObjectNames sources" $ AL.genObjectNames srcCount
+  -- Create a delay queue for waveform data to sync with playback
+  -- Use a simple counter-based delay instead of timestamps
+  waveformDelayQueue <- newIORef ([] :: [V.Vector Float])
+  let bufferDelayCount = 10  -- Match the queueSize defined later
   forM_ srcs $ \src -> do
     with src $ \p -> do
       srcID <- peek $ castPtr p -- this is dumb but OpenAL pkg doesn't expose constructor
@@ -327,20 +331,30 @@ readySourceWithWaveform pans vols initGain ca waveformBuf = do
                           interleaved = CA.interleave [c1, c2]
                           in interleaved : groupChannels xs ys
                         groupChannels _ _ = []
-                    -- Capture waveform data: mix all channels together for visualization
+                    -- Queue waveform data for delayed processing (to sync with playback)
                     liftIO $ case grouped of
                       [] -> return ()
                       channels -> do
                         -- Mix all channels together instead of just taking the first
                         let mixedSamples = mixMultipleChannels channels
                             waveformSamples = stereoInt16ToMonoFloat mixedSamples
-                        -- Use try to prevent waveform issues from blocking audio
-                        -- Force evaluation inside the exception handler
+                        -- Add to delay queue instead of immediately updating waveform
                         _ <- try @SomeException $ do
-                          addWaveformSamples waveformBuf waveformSamples
-                          -- Force evaluation by reading back the buffer
-                          (newBuf, _) <- readIORef waveformBuf
-                          seq (V.length newBuf) (return ())
+                          currentQueue <- readIORef waveformDelayQueue
+                          let newQueue = waveformSamples : currentQueue
+                              -- Keep queue size reasonable, matching buffer delay
+                              trimmedQueue = take (bufferDelayCount + 2) newQueue
+                          writeIORef waveformDelayQueue trimmedQueue
+                          
+                          -- If queue is long enough, process the oldest waveform data
+                          when (length newQueue > bufferDelayCount) $ do
+                            case reverse newQueue of
+                              [] -> return ()
+                              (oldestWaveform : _) -> do
+                                addWaveformSamples waveformBuf oldestWaveform
+                                -- Force evaluation
+                                (newBuf, _) <- readIORef waveformBuf
+                                seq (V.length newBuf) (return ())
                         return ()
                     forM_ (zip bufs grouped) $ \(buf, chan') -> do
                       liftIO $ V.unsafeWith chan' $ \p -> do
