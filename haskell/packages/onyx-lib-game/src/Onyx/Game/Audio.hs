@@ -16,7 +16,7 @@ import           Control.Concurrent.Async     (async, forConcurrently,
                                                mapConcurrently_)
 import           Control.Concurrent.MVar
 import           Control.Exception            (SomeException, bracket, try)
-import           Control.Monad                (forM, forM_, join, when)
+import           Control.Monad                (forM, forM_, join, unless, when)
 import           Control.Monad.IO.Class       (MonadIO, liftIO)
 import           Control.Monad.Trans.Resource
 import           Data.Conduit                 (runConduit, (.|))
@@ -25,7 +25,6 @@ import qualified Data.Conduit.Audio           as CA
 import           Data.Conduit.Audio.Sndfile   (sourceSndFrom)
 import           Data.Foldable                (toList)
 import qualified Data.HashMap.Strict          as HM
-import           Data.Int                     (Int32)
 import           Data.IORef
 import qualified Data.List.NonEmpty           as NE
 import           Data.List.Split              (splitPlaces)
@@ -208,9 +207,9 @@ foreign import ccall unsafe
   alSourcei :: AL.ALuint -> AL.ALenum -> AL.ALint -> IO ()
 
 data AudioHandle = AudioHandle
-  { audioStop       :: IO ()
-  , audioSetGain    :: Float -> IO ()
-  , audioWaveform   :: IO (V.Vector Float) -- ^ Get recent waveform data (mono, normalized -1 to 1)
+  { audioStop     :: IO ()
+  , audioSetGain  :: Float -> IO ()
+  , audioWaveform :: IO (V.Vector Float) -- ^ Get recent waveform data (mono, normalized -1 to 1)
   }
 
 data AssignedSource
@@ -256,6 +255,7 @@ playSource pans vols initGain ca = do
   doAL "playSource play" $ AL.play $ sourceAL ready
   return $ sourceHandle ready
 
+{-
 readySource
   :: [Float] -- ^ channel pans, -1 (L) to 1 (R)
   -> [Float] -- ^ channel volumes, in decibels
@@ -265,6 +265,7 @@ readySource
 readySource pans vols initGain ca = do
   dummyWaveform <- newWaveformBuffer
   readySourceWithWaveform pans vols initGain ca dummyWaveform
+-}
 
 readySourceWithWaveform
   :: [Float] -- ^ channel pans, -1 (L) to 1 (R)
@@ -281,7 +282,7 @@ readySourceWithWaveform pans vols initGain ca waveformBuf = do
   -- Create a delay queue for waveform data to sync with playback
   -- Use a simple counter-based delay instead of timestamps
   waveformDelayQueue <- newIORef ([] :: [V.Vector Float])
-  let bufferDelayCount = 10  -- Match the queueSize defined later
+  let bufferDelayCount = 7 -- slightly lower than queueSize later
   forM_ srcs $ \src -> do
     with src $ \p -> do
       srcID <- peek $ castPtr p -- this is dumb but OpenAL pkg doesn't expose constructor
@@ -345,7 +346,7 @@ readySourceWithWaveform pans vols initGain ca waveformBuf = do
                               -- Keep queue size reasonable, matching buffer delay
                               trimmedQueue = take (bufferDelayCount + 2) newQueue
                           writeIORef waveformDelayQueue trimmedQueue
-                          
+
                           -- If queue is long enough, process the oldest waveform data
                           when (length newQueue > bufferDelayCount) $ do
                             case reverse newQueue of
@@ -372,6 +373,15 @@ readySourceWithWaveform pans vols initGain ca waveformBuf = do
                 case audioState of
                   Filling -> liftIO $ putMVar firstFull ()
                   _       -> return ()
+                -- Add fake waveform progression for smooth 60fps visualization
+                liftIO $ do
+                  (currentBuf, pos) <- readIORef waveformBuf
+                  unless (V.null currentBuf) $ do
+                    -- Create a small "shift" by taking a slice from current buffer
+                    let sliceSize = min 64 (V.length currentBuf `div` 10)  -- Small slice
+                        startIdx = pos `mod` max 1 (V.length currentBuf - sliceSize)
+                        slice = V.slice startIdx sliceSize currentBuf
+                    addWaveformSamples waveformBuf slice
                 removedBuffers <- fmap Set.unions $ liftIO $ forM srcs $ \src -> doAL "playSource buffersProcessed" (AL.buffersProcessed src) >>= \case
                   0 -> return Set.empty
                   n -> do

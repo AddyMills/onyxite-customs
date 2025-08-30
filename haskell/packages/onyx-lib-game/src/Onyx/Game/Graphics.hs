@@ -3050,7 +3050,7 @@ drawWaveform gl (WindowDims wWhole hWhole) waveformData = do
       waveformX = wWhole - waveformWidth - 20
       waveformY = 20
       numSamples = VS.length waveformData
-      
+
   -- Draw background
   drawBackgroundBox gl (WindowDims wWhole hWhole)
     (V2 waveformX waveformY)
@@ -3058,16 +3058,16 @@ drawWaveform gl (WindowDims wWhole hWhole) waveformData = do
     (V4 0 0 0 0.7)  -- Semi-transparent black background
     5  -- Corner radius
     [TL, TR, BL, BR]
-  
+
   -- Draw waveform samples as vertical lines
   when (numSamples > 0) $ do
     let samplesPerPixel = max 1 $ numSamples `div` waveformWidth
         centerY = waveformY + waveformHeight `div` 2
         maxHeight = fromIntegral waveformHeight / 2.0 - 5  -- Leave some margin
         actualWidth = min waveformWidth numSamples  -- Don't exceed available samples
-    
+
     forM_ [0 .. actualWidth - 1] $ \i -> do
-      let sampleIdx = if samplesPerPixel == 1 
+      let sampleIdx = if samplesPerPixel == 1
                       then i  -- Direct mapping when samplesPerPixel is 1
                       else min (i * samplesPerPixel) (numSamples - 1)  -- Ensure bounds
       when (sampleIdx >= 0 && sampleIdx < numSamples) $ do
@@ -3076,7 +3076,7 @@ drawWaveform gl (WindowDims wWhole hWhole) waveformData = do
             lineTop = centerY - round sampleHeight
             lineBottom = centerY + round sampleHeight
             lineX = waveformX + i
-        
+
         -- Draw vertical line representing the waveform sample
         drawBackgroundBox gl (WindowDims wWhole hWhole)
           (V2 lineX lineTop)
