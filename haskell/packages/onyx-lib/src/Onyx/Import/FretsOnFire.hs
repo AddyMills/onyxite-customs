@@ -128,7 +128,8 @@ redoSwells
 redoSwells (F.Song tmap mmap ps) = let
   fixTrack trk = let
     notes = RTB.collectCoincident
-      $ RTB.filter (\(gem, _vel) -> gem /= Drums.Kick)
+      $ RTB.filter (/= Drums.Kick)
+      $ fmap fst -- discard velocity
       $ (fromMaybe mempty $ Map.lookup Expert trk.drumDifficulties).drumGems
 
     -- for single rolls, don't process ones that include snares.
@@ -145,9 +146,7 @@ redoSwells (F.Song tmap mmap ps) = let
     (singleRollsEdit, singleRollsLeave) = flip RTB.partition allSingleRollsWithAbsTime
       $ \(t, len) -> let
         thisLaneNotes = U.trackTake len $ U.trackDrop t notes
-        isSnare (Drums.Red, _vel) = True
-        isSnare _                 = False
-        in all (all $ not . isSnare) thisLaneNotes
+        in all (all (/= Drums.Red)) thisLaneNotes
     singleRollsEditBools = splitEdgesBool $ snd <$> singleRollsEdit
     singleRollsLeaveBools = splitEdgesBool $ snd <$> singleRollsLeave
 
