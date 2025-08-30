@@ -25,6 +25,7 @@ import qualified Data.Conduit.Audio           as CA
 import           Data.Conduit.Audio.Sndfile   (sourceSndFrom)
 import           Data.Foldable                (toList)
 import qualified Data.HashMap.Strict          as HM
+import           Data.Int                     (Int32)
 import           Data.IORef
 import qualified Data.List.NonEmpty           as NE
 import           Data.List.Split              (splitPlaces)
@@ -88,21 +89,15 @@ addWaveformSamples bufRef samples = do
       maxSamplesToAdd = min samplesLen bufLen
       samplesToAdd = V.take maxSamplesToAdd samples
       actualSamplesLen = V.length samplesToAdd
-  -- Debug info
-  when (samplesLen > 0) $ do
-    putStrLn $ "addWaveformSamples: original samplesLen=" ++ show samplesLen ++ " limited to=" ++ show actualSamplesLen ++ " pos=" ++ show pos ++ " bufLen=" ++ show bufLen
   if actualSamplesLen == 0 || pos < 0 || pos >= bufLen
-    then do
-      when (samplesLen > 0) $ putStrLn "addWaveformSamples: Early return due to invalid state"
-      return ()  -- Nothing to add or invalid state
+    then return ()  -- Nothing to add or invalid state
     else do
       let newPos = (pos + actualSamplesLen) `mod` waveformBufferSize
       if pos + actualSamplesLen <= waveformBufferSize
         then do
           -- Simple case: no wraparound
           let indices = [pos .. pos + actualSamplesLen - 1]
-          putStrLn $ "addWaveformSamples: Simple case, indices range: " ++ show (head indices) ++ ".." ++ show (last indices) ++ " (bufLen=" ++ show bufLen ++ ")"
-          let updates = zip indices (V.toList samplesToAdd)
+              updates = zip indices (V.toList samplesToAdd)
               newBuf = buf V.// updates
           -- Force evaluation of the new vector
           seq (V.length newBuf) $ writeIORef bufRef (newBuf, newPos)
@@ -112,8 +107,7 @@ addWaveformSamples bufRef samples = do
               (samples1, samples2) = V.splitAt firstPartLen samplesToAdd
               indices1 = [pos .. waveformBufferSize - 1]
               indices2 = [0 .. V.length samples2 - 1]
-          putStrLn $ "addWaveformSamples: Wrap case, indices1: " ++ show (head indices1) ++ ".." ++ show (last indices1) ++ ", indices2: " ++ show (if null indices2 then "empty" else show (head indices2) ++ ".." ++ show (last indices2)) ++ " (bufLen=" ++ show bufLen ++ ")"
-          let updates1 = zip indices1 (V.toList samples1)
+              updates1 = zip indices1 (V.toList samples1)
               updates2 = zip indices2 (V.toList samples2)
               buf1 = buf V.// updates1
               buf2 = buf1 V.// updates2
@@ -127,6 +121,21 @@ getWaveformData bufRef = do
   -- Return buffer arranged from current position (oldest first)
   let (newer, older) = V.splitAt pos buf
   return $ older V.++ newer
+
+-- | Mix multiple stereo Int16 channels together
+mixMultipleChannels :: [V.Vector Int16] -> V.Vector Int16
+mixMultipleChannels [] = V.empty
+mixMultipleChannels [single] = single  -- No mixing needed for single channel
+mixMultipleChannels channels = let
+  -- Find the length of the shortest channel (all should be same length but be safe)
+  minLen = minimum $ map V.length channels
+  -- Mix samples at each position
+  in V.generate minLen $ \i -> let
+    -- Sum all channels at position i, clamping to avoid overflow
+    summed = sum $ map (\ch -> fromIntegral (ch V.! i) :: Int32) channels
+    -- Clamp to Int16 range to prevent overflow
+    clamped = max (-32768) $ min 32767 summed
+    in fromIntegral clamped
 
 -- | Convert Int16 stereo samples to mono Float samples, normalized to [-1,1]
 stereoInt16ToMonoFloat :: V.Vector Int16 -> V.Vector Float
@@ -321,8 +330,10 @@ readySourceWithWaveform pans vols initGain ca waveformBuf = do
                     -- Capture waveform data: mix all channels together for visualization
                     liftIO $ case grouped of
                       [] -> return ()
-                      (firstChan : _) -> do
-                        let waveformSamples = stereoInt16ToMonoFloat firstChan
+                      channels -> do
+                        -- Mix all channels together instead of just taking the first
+                        let mixedSamples = mixMultipleChannels channels
+                            waveformSamples = stereoInt16ToMonoFloat mixedSamples
                         -- Use try to prevent waveform issues from blocking audio
                         -- Force evaluation inside the exception handler
                         _ <- try @SomeException $ do
