@@ -2693,6 +2693,7 @@ freeTexture (Texture tex _ _) = liftIO $ with tex $ glDeleteTextures 1
 -- | Split up the available space to show tracks at the largest possible size.
 -- Returns [(x, y, w, h)] in GL space (so bottom left corner is (0, 0)).
 splitHighwaySpace :: Int -> Float -> WindowDims -> [(Int, Int, Int, Int)]
+splitHighwaySpace 0 _                _                = []
 splitHighwaySpace n heightWidthRatio (WindowDims w h) = let
   fi :: Int -> Float
   fi = fromIntegral
@@ -2933,6 +2934,12 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAud
       Nothing -> return ()
     PreviewBGImage f -> forM_ (Map.lookup f gl.imageBGs) $ drawBackground gl dims BackgroundFit
 
+  -- Draw waveform visualization
+  forM_ mAudioHandle $ \audioHandle -> checkGL "draw waveform" $ do
+    waveformData <- audioWaveform audioHandle
+    unless (VS.null waveformData) $ do
+      drawWaveform gl dims waveformData
+
   glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
   forM_ gl.previewSong $ \psong -> let
     songLength = U.applyTempoMap (previewTempo psong) $ timingEnd $ previewTiming psong
@@ -3036,54 +3043,45 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAud
       [TL, TR, BL, BR]
     drawTextLine gl dims (map (, Nothing) texLine) (V2 textX textY)
 
-  -- Draw waveform visualization
-  forM_ mAudioHandle $ \audioHandle -> checkGL "draw waveform" $ do
-    waveformData <- audioWaveform audioHandle
-    unless (VS.null waveformData) $ do
-      drawWaveform gl dims waveformData
-
 drawWaveform :: GLStuff -> WindowDims -> VS.Vector Float -> IO ()
 drawWaveform gl (WindowDims wWhole hWhole) waveformData = do
-  -- Position waveform at top-right corner
-  let waveformWidth = 300
-      waveformHeight = 80
-      waveformX = wWhole - waveformWidth - 20
-      waveformY = 20
-      numSamples = VS.length waveformData
 
-  -- Draw background
-  drawBackgroundBox gl (WindowDims wWhole hWhole)
-    (V2 waveformX waveformY)
-    (V2 waveformWidth waveformHeight)
-    (V4 0 0 0 0.7)  -- Semi-transparent black background
-    5  -- Corner radius
-    [TL, TR, BL, BR]
+  let waveformWidth = wWhole
+      waveformHeight = hWhole
+      waveformX = 0
+      waveformY = 0
+      numSamples = VS.length waveformData
 
   -- Draw waveform samples as vertical lines
   when (numSamples > 0) $ do
-    let samplesPerPixel = max 1 $ numSamples `div` waveformWidth
-        centerY = waveformY + waveformHeight `div` 2
+    let centerY = waveformY + waveformHeight `div` 2
         maxHeight = fromIntegral waveformHeight / 2.0 - 5  -- Leave some margin
-        actualWidth = min waveformWidth numSamples  -- Don't exceed available samples
 
-    forM_ [0 .. actualWidth - 1] $ \i -> do
-      let sampleIdx = if samplesPerPixel == 1
-                      then i  -- Direct mapping when samplesPerPixel is 1
-                      else min (i * samplesPerPixel) (numSamples - 1)  -- Ensure bounds
-      when (sampleIdx >= 0 && sampleIdx < numSamples) $ do
-        let sample = waveformData VS.! sampleIdx
-            sampleHeight = abs sample * maxHeight
-            lineTop = centerY - round sampleHeight
-            lineBottom = centerY + round sampleHeight
-            lineX = waveformX + i
+    forM_ [0 .. waveformWidth - 1] $ \i -> do
+      let -- Map pixel position to sample position with interpolation
+          samplePos = fromIntegral i * fromIntegral (numSamples - 1) / fromIntegral (waveformWidth - 1)
+          sampleIdx = floor samplePos
+          sampleFrac = samplePos - fromIntegral sampleIdx
 
-        -- Draw vertical line representing the waveform sample
-        drawBackgroundBox gl (WindowDims wWhole hWhole)
-          (V2 lineX lineTop)
-          (V2 1 (lineBottom - lineTop + 1))
-          (V4 0.2 0.8 0.2 0.8)  -- Green color
-          0  -- No corner radius for thin lines
-          []
+          -- Get samples for interpolation
+          sample1 = waveformData VS.! min sampleIdx (numSamples - 1)
+          sample2 = if sampleIdx + 1 < numSamples
+                   then waveformData VS.! (sampleIdx + 1)
+                   else sample1
+
+          -- Linear interpolation
+          sample = sample1 + sampleFrac * (sample2 - sample1)
+          sampleHeight = abs sample * maxHeight
+          lineTop = centerY - round sampleHeight
+          lineBottom = centerY + round sampleHeight
+          lineX = waveformX + i
+
+      -- Draw vertical line representing the waveform sample
+      drawColor gl (WindowDims wWhole hWhole)
+        gl.quadObject
+        (V2 lineX lineTop)
+        (V2 1 (lineBottom - lineTop + 1))
+        (V4 0 0 0 0.7) -- Semi-transparent black
 
 checkGL :: (MonadIO m) => String -> m a -> m a
 checkGL s f = do
