@@ -139,6 +139,140 @@ vec4 apply(sampler2D tex, vec2 fragCoord, vec2 resolution) {
   return fxaa(tex, fragCoord, resolution, v_rgbNW, v_rgbNE, v_rgbSW, v_rgbSE, v_rgbM);
 }
 
+// Claude Code came up with most of these
+vec3 applyPostProcess(vec3 color, uint effectIndex) {
+  if (effectIndex == 0u) {
+    // V3_ProFilm_a - film look with slight warmth
+    color = pow(color, vec3(0.9));
+    color = mix(color, color * vec3(1.1, 1.0, 0.9), 0.3);
+    return color;
+  } else if (effectIndex == 1u) {
+    // V3_ProFilm_b - cooler film look
+    color = pow(color, vec3(0.85));
+    color = mix(color, color * vec3(0.9, 1.0, 1.1), 0.3);
+    return color;
+  } else if (effectIndex == 2u) {
+    // V3_video_a - video look with slight saturation boost
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    return mix(vec3(luma), color, 1.2);
+  } else if (effectIndex == 3u) {
+    // V3_film_16mm - grainy film look
+    float noise = fract(sin(dot(TexCoord, vec2(12.9898, 78.233))) * 43758.5453);
+    color = mix(color, color + (noise - 0.5) * 0.1, 0.5);
+    return pow(color, vec3(0.9));
+  } else if (effectIndex == 4u) {
+    // V3_shitty_tv - old TV/security camera look
+    float scanline = sin(TexCoord.y * 800.0) * 0.04;
+    color = mix(color, vec3(dot(color, vec3(0.333))), 0.3);
+    return color + scanline;
+  } else if (effectIndex == 5u) {
+    // V3_bloom - bright bloom effect
+    return color * 1.5 + pow(color, vec3(0.5)) * 0.3;
+  } else if (effectIndex == 6u) {
+    // V3_film_sepia_ink - sepia tone
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    return vec3(luma * 1.2, luma * 1.0, luma * 0.8);
+  } else if (effectIndex == 7u) {
+    // V3_film_silvertone - silver/monochrome with blue tint
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    return vec3(luma * 0.9, luma * 0.95, luma * 1.1);
+  } else if (effectIndex == 8u) {
+    // V3_film_b_w - black and white
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    return vec3(luma);
+  } else if (effectIndex == 9u) {
+    // V3_video_bw - video black and white
+    float luma = dot(color, vec3(0.333));
+    return vec3(luma);
+  } else if (effectIndex == 10u) {
+    // V3_contrast_a - high contrast
+    return (color - 0.5) * 1.5 + 0.5;
+  } else if (effectIndex == 11u) {
+    // V3_photocopy - high contrast black and white
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    luma = (luma - 0.5) * 3.0 + 0.5;
+    return vec3(clamp(luma, 0.0, 1.0));
+  } else if (effectIndex == 12u) {
+    // V3_film_blue_filter - blue filter
+    return color * vec3(0.7, 0.8, 1.3);
+  } else if (effectIndex == 13u) {
+    // V3_desat_blue - desaturated with blue tint
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    vec3 desat = mix(vec3(luma), color, 0.3);
+    return desat * vec3(0.9, 0.95, 1.2);
+  } else if (effectIndex == 14u) {
+    // V3_video_security - security camera look
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    vec3 greenTint = vec3(luma * 0.8, luma * 1.2, luma * 0.8);
+    float scanline = sin(TexCoord.y * 600.0) * 0.03;
+    return greenTint + scanline;
+  } else if (effectIndex == 15u) {
+    // V3_bright - brightened
+    return color * 2.5;
+  } else if (effectIndex == 16u) {
+    // V3_posterize - posterization effect
+    return floor(color * 6.0) / 6.0;
+  } else if (effectIndex == 17u) {
+    // V3_clean_trails - subtle trails/blur
+    return mix(color, color * 0.9, 0.1);
+  } else if (effectIndex == 18u) {
+    // V3_video_trails - video trails
+    return mix(color, color * 0.8, 0.2);
+  } else if (effectIndex == 19u) {
+    // V3_flicker_trails - flickering trails
+    float flicker = sin(TexCoord.x * 50.0 + TexCoord.y * 30.0) * 0.1 + 0.9;
+    return color * flicker;
+  } else if (effectIndex == 20u) {
+    // V3_desat_posterize_trails - desaturated posterized with trails
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    vec3 desat = mix(vec3(luma), color, 0.4);
+    return floor(desat * 5.0) / 5.0;
+  } else if (effectIndex == 21u) {
+    // V3_film_contrast - film with high contrast
+    color = pow(color, vec3(0.8));
+    return (color - 0.5) * 1.3 + 0.5;
+  } else if (effectIndex == 22u) {
+    // V3_film_contrast_blue - film contrast with blue tint
+    color = pow(color, vec3(0.8));
+    color = (color - 0.5) * 1.3 + 0.5;
+    return color * vec3(0.8, 0.9, 1.3);
+  } else if (effectIndex == 23u) {
+    // V3_film_contrast_green - film contrast with green tint
+    color = pow(color, vec3(0.8));
+    color = (color - 0.5) * 1.3 + 0.5;
+    return color * vec3(0.8, 1.3, 0.9);
+  } else if (effectIndex == 24u) {
+    // V3_film_contrast_red - film contrast with red tint
+    color = pow(color, vec3(0.8));
+    color = (color - 0.5) * 1.3 + 0.5;
+    return color * vec3(1.3, 0.8, 0.9);
+  } else if (effectIndex == 25u) {
+    // V3_horror_movie_special - black (light input) on bright red (dark input)
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    return mix(vec3(1.0, 0.0, 0.0), vec3(0.0), luma);
+  } else if (effectIndex == 26u) {
+    // V3_photo_negative - photo negative
+    return 1.0 - color;
+  } else if (effectIndex == 27u) {
+    // V3_ProFilm_mirror_a - mirror effect
+    vec2 mirrorCoord = vec2(1.0 - TexCoord.x, TexCoord.y);
+    vec3 mirroredColor = texture(inTexture, mirrorCoord).rgb;
+    return mix(color, mirroredColor, 0.5);
+  } else if (effectIndex == 28u) {
+    // V3_ProFilm_psychedelic_blue_red - bright red (light input) on bright blue (dark input)
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    return mix(vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0), luma);
+  } else if (effectIndex == 29u) {
+    // V3_space_woosh - space effect
+    float dist = distance(TexCoord, vec2(0.5));
+    float woosh = 1.0 - smoothstep(0.0, 0.7, dist);
+    return color * (1.0 + woosh * 0.5) + vec3(woosh * 0.2);
+  }
+
+  // Default case - return original color
+  return color;
+}
+
 void main()
 {
   if (colorMode == 0u) {
@@ -156,7 +290,9 @@ void main()
     ;
 
   if (doPostProcess) {
-    // TODO modify result with postprocessing effect
+    vec3 startEffect = applyPostProcess(result.rgb, postProcessStart);
+    vec3 endEffect = applyPostProcess(result.rgb, postProcessEnd);
+    result.rgb = mix(startEffect, endEffect, postProcessFraction);
   }
 
   // note highway horizon fade
