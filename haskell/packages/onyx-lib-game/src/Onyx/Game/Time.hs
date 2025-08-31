@@ -15,6 +15,7 @@
 {-# LANGUAGE OverloadedRecordDot        #-}
 {-# LANGUAGE PatternSynonyms            #-}
 {-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE StrictData                 #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
@@ -41,6 +42,7 @@ import           Onyx.MIDI.Track.Beat
 import           Onyx.MIDI.Track.Drums.Elite
 import qualified Onyx.MIDI.Track.FiveFret         as Five
 import qualified Onyx.MIDI.Track.ProGuitar        as PG
+import           Onyx.MIDI.Track.Venue
 import           Onyx.MIDI.Track.Vocal
 import           Onyx.PhaseShift.Dance            (NoteType (..))
 import qualified Sound.MIDI.Util                  as U
@@ -256,30 +258,38 @@ data VocalTube t = VocalTube
   , timeEnd   :: t
   } deriving (Show)
 
-makeSustainView :: (Eq t) => (a -> t) -> (a -> t) -> [a] -> [(t, SustainView a)]
-makeSustainView timeStart timeEnd initialFuture = let
-  makeStart past = \case
-    syl1 : rest -> (timeStart syl1, SustainView
-      { past = past
-      , now = ToggleStart syl1
-      , future = rest
-      }) : decideEndRestart past syl1 rest
-    [] -> []
-  decideEndRestart past syl1 rest = case rest of
-    syl2 : rest' | timeEnd syl1 == timeStart syl2
-      -> makeRestart past syl1 syl2 rest'
-    _ -> makeEnd past syl1 rest
-  makeEnd past syl rest = (timeEnd syl, SustainView
-    { past = past
-    , now = ToggleEnd syl
-    , future = rest
-    }) : makeStart (syl : past) rest
-  makeRestart past syl1 syl2 rest = (timeEnd syl1, SustainView
-    { past = past
-    , now = ToggleRestart syl1 syl2
-    , future = rest
-    }) : decideEndRestart (syl1 : past) syl2 rest
-  in makeStart [] initialFuture
+data VenueState t = VenueState
+  { lighting       :: LightState t Lighting
+  , postProcessing :: LightState t PostProcess3
+  } deriving (Show, Generic)
+    deriving (TimeState) via GenericTimeState (VenueState t)
+
+data LightState t a
+  = LightStatic    a
+  | LightFade      (t, a) (t, a)
+  | LightStartFade (t, a) (t, a)
+  | LightEndFade   (t, a) (t, a)
+  deriving (Show)
+
+class LightDefault a where
+  lightDefault :: a
+
+instance LightDefault Lighting where
+  lightDefault = Lighting_
+
+instance LightDefault PostProcess3 where
+  lightDefault = V3_ProFilm_a
+
+instance (LightDefault a) => TimeState (LightState t a) where
+  before = \case
+    LightStartFade (_, x) _ -> LightStatic x
+    LightEndFade   x      y -> LightFade x y
+    ls                      -> ls
+  after = \case
+    LightStartFade x y      -> LightFade x y
+    LightEndFade   _ (_, y) -> LightStatic y
+    ls                      -> ls
+  empty = LightStatic lightDefault
 
 ----------------------------------------------------
 
@@ -376,6 +386,42 @@ zipStateLists rtbX rtbY = let
         then {- tx < ty -} Wait tx (x, py) $ go (after x) py xs (Wait d y ys)
         else {- tx > ty -} Wait ty (px, y) $ go px (after y) (Wait d x xs) ys
   in go initX initY rtbX rtbY
+
+makeSustainView :: (Eq t) => (a -> t) -> (a -> t) -> [a] -> [(t, SustainView a)]
+makeSustainView timeStart timeEnd initialFuture = let
+  makeStart past = \case
+    syl1 : rest -> (timeStart syl1, SustainView
+      { past = past
+      , now = ToggleStart syl1
+      , future = rest
+      }) : decideEndRestart past syl1 rest
+    [] -> []
+  decideEndRestart past syl1 rest = case rest of
+    syl2 : rest' | timeEnd syl1 == timeStart syl2
+      -> makeRestart past syl1 syl2 rest'
+    _ -> makeEnd past syl1 rest
+  makeEnd past syl rest = (timeEnd syl, SustainView
+    { past = past
+    , now = ToggleEnd syl
+    , future = rest
+    }) : makeStart (syl : past) rest
+  makeRestart past syl1 syl2 rest = (timeEnd syl1, SustainView
+    { past = past
+    , now = ToggleRestart syl1 syl2
+    , future = rest
+    }) : decideEndRestart (syl1 : past) syl2 rest
+  in makeStart [] initialFuture
+
+makeLightStates :: (Ord t, Eq a, LightDefault a) => Map.Map t a -> Map.Map t (LightState t a)
+makeLightStates = let
+  go maybeInitial = \case
+    (t1, x) : (t2, y) : rest@((t3, z) : _) | x == y
+      -> (t1, fromMaybe (LightStatic x) maybeInitial)
+        : (t2, LightStartFade (t2, y) (t3, z))
+        : go (Just $ LightEndFade (t2, y) (t3, z)) rest
+    (t, x) : rest -> (t, LightStatic x) : go Nothing rest
+    [] -> []
+  in Map.fromList . go Nothing . Map.toAscList
 
 -- generic stuff
 

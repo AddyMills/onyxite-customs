@@ -40,6 +40,8 @@ import qualified Onyx.MIDI.Track.FiveFret         as Five
 import           Onyx.MIDI.Track.Mania
 import qualified Onyx.MIDI.Track.ProGuitar        as PG
 import           Onyx.MIDI.Track.Rocksmith
+import           Onyx.MIDI.Track.Venue            (VenueTrack (..),
+                                                   compileVenueRB3)
 import           Onyx.MIDI.Track.Vocal
 import           Onyx.Mode
 import           Onyx.PhaseShift.Dance            (NoteType (..))
@@ -70,8 +72,8 @@ data PreviewTrack
 data PreviewBG
   = PreviewBGVideo (VideoInfo FilePath)
   | PreviewBGImage FilePath
-  -- TODO PreviewBGVenueRB
-  deriving (Eq, Show)
+  | PreviewBGVenue (Map.Map Double (PNF.VenueState Double))
+  deriving (Show)
 
 data PreviewSong = PreviewSong
   { previewTempo    :: U.TempoMap
@@ -700,6 +702,14 @@ computeTracks songYaml song = basicTiming False song (return 0) >>= \timing -> l
     , case songYaml.global.fileBackgroundImage of
       Nothing -> []
       Just f  -> [("Background Image", PreviewBGImage f)]
+    , do
+      guard $ song.tracks.onyxVenue /= mempty
+      let rb3 = compileVenueRB3 song.tracks.onyxVenue
+      return $ ("Venue Track", PreviewBGVenue
+        $ (\(a, b) -> PNF.VenueState a b) <$> do
+          PNF.makeLightStates (rtbToMap rb3.venueLighting)
+            `PNF.zipStateMaps` PNF.makeLightStates (rtbToMap rb3.venuePostProcessRB3)
+        )
     ]
 
   in tracks >>= \trk -> return $ PreviewSong

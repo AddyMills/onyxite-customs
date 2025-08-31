@@ -3345,14 +3345,15 @@ previewGroup sink rect getSong getTime getSpeed getAudioHandle = do
     sink $ EventIO FLTK.redraw
     sink $ EventIO $ void $ FL.popup trackMenu -- reopen menu (TODO find a way to not close it at all)
   bgMenu <- FL.menuButtonNew bgSelectArea $ Just "Background"
-  let bgs = previewBG initSong
-      initialBG = fmap snd $ listToMaybe bgs
-  currentBG <- newIORef initialBG
-  let allBGs = ("None", Nothing) : [(t, Just bg) | (t, bg) <- bgs]
+  let bgs = [(t, Just bg) | (t, bg) <- previewBG initSong]
+      emptyBG = ("None", Nothing)
+      initialBG = fromMaybe emptyBG $ listToMaybe bgs
+      allBGs = emptyBG : bgs
+  currentBG <- newIORef $ snd initialBG
   forM_ allBGs $ \(t, bg) -> do
     FL.add bgMenu t Nothing
       ((Just $ \_ -> writeIORef currentBG bg) :: Maybe (FL.Ref FL.MenuItem -> IO ()))
-      (FL.MenuItemFlags $ FL.MenuItemRadio : [FL.MenuItemValue | bg == initialBG])
+      (FL.MenuItemFlags $ FL.MenuItemRadio : [FL.MenuItemValue | t == fst initialBG])
   FL.end bottomControlsGroup
   FL.setResizable bottomControlsGroup $ Just bottomSizeRef
 

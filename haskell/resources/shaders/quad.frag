@@ -11,6 +11,12 @@ uniform float startFade;
 uniform float endFade;
 uniform bool doFXAA;
 
+// rb3 venue postprocessing
+uniform bool doPostProcess;
+uniform uint postProcessStart;
+uniform float postProcessFraction; // 0 (start) to 1 (end)
+uniform uint postProcessEnd;
+
 /**
 GLSL FXAA implementation from https://github.com/mattdesl/glsl-fxaa/
 
@@ -143,14 +149,23 @@ void main()
     return;
   }
 
-  // implement note highway horizon fade
-  float horizonFade = 1.0 - (TexCoord.y - startFade) / (endFade - startFade);
-  if (horizonFade > 1.0) horizonFade = 1.0;
-  if (horizonFade < 0.0) horizonFade = 0.0;
   vec4 result
     = doFXAA
     ? apply(inTexture, TexCoord * inResolution, inResolution)
     : texture(inTexture, TexCoord)
     ;
-  FragColor = vec4(result.rgb, result.a * horizonFade);
+
+  if (doPostProcess) {
+    // TODO modify result with postprocessing effect
+  }
+
+  // note highway horizon fade
+  if (endFade > startFade) {
+    float horizonFade = 1.0 - (TexCoord.y - startFade) / (endFade - startFade);
+    if (horizonFade > 1.0) horizonFade = 1.0;
+    if (horizonFade < 0.0) horizonFade = 0.0;
+    result = vec4(result.rgb, result.a * horizonFade);
+  }
+
+  FragColor = result;
 }

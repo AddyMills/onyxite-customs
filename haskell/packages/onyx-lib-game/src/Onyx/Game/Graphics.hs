@@ -63,6 +63,7 @@ import           Onyx.MIDI.Track.Drums.Elite  (EliteDrumNote (..))
 import qualified Onyx.MIDI.Track.Drums.Elite  as ED
 import qualified Onyx.MIDI.Track.FiveFret     as Five
 import qualified Onyx.MIDI.Track.ProGuitar    as PG
+import           Onyx.MIDI.Track.Venue        (PostProcess3)
 import           Onyx.MIDI.Track.Vocal
 import           Onyx.PhaseShift.Dance        (NoteType (..))
 import           Onyx.Preferences             (EliteDrumLayoutHint (..),
@@ -2549,16 +2550,18 @@ stopVideoLoaders gl = liftIO $ do
 
 data WindowDims = WindowDims Int Int
 
-drawTextureFade :: GLStuff -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
-drawTextureFade gl = drawTexture' gl $ let
-  fade = gl.gfxConfig.view.track_fade
-  in (fade.bottom, fade.top)
+data QuadDrawSettings = QuadDrawSettings
+  { fxaa        :: Bool
+  , fadeHorizon :: Bool
+  , postProcess :: Maybe (PostProcess3, Double, PostProcess3)
+  }
 
-drawTexture :: GLStuff -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
-drawTexture gl = drawTexture' gl (1, 1)
+drawTexture :: GLStuff -> QuadDrawSettings -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
+drawTexture gl settings (WindowDims screenW screenH) (Texture tex w h) maybeColor (V2 x y) scale = do
 
-drawTexture' :: GLStuff -> (Float, Float) -> WindowDims -> Texture -> Maybe (V4 Float) -> V2 Int -> Int -> IO ()
-drawTexture' gl (fadeBottom, fadeTop) (WindowDims screenW screenH) (Texture tex w h) maybeColor (V2 x y) scale = do
+  let fadeBottom = if settings.fadeHorizon then gl.gfxConfig.view.track_fade.bottom else 1
+      fadeTop    = if settings.fadeHorizon then gl.gfxConfig.view.track_fade.top    else 1
+
   glUseProgram gl.quadShader
   glActiveTexture GL_TEXTURE0
   checkGL "glBindTexture" $ glBindTexture GL_TEXTURE_2D tex
@@ -2577,12 +2580,19 @@ drawTexture' gl (fadeBottom, fadeTop) (WindowDims screenW screenH) (Texture tex 
     (fromIntegral (h * scale) :: Float)
   sendUniformName gl.quadShader "startFade" fadeBottom
   sendUniformName gl.quadShader "endFade" fadeTop
-  sendUniformName gl.quadShader "doFXAA" gl.fxaaEnabled
+  sendUniformName gl.quadShader "doFXAA" $ gl.fxaaEnabled && settings.fxaa
   case maybeColor of
     Nothing -> sendUniformName gl.quadShader "colorMode" (2 :: GLuint)
     Just color -> do
       sendUniformName gl.quadShader "colorMode" (1 :: GLuint)
       sendUniformName gl.quadShader "color" color
+  case settings.postProcess of
+    Nothing -> sendUniformName gl.quadShader "doPostProcess" False
+    Just (start, frac, end) -> do
+      sendUniformName gl.quadShader "doPostProcess"       True
+      sendUniformName gl.quadShader "postProcessStart"    (fromIntegral $ fromEnum start :: GLuint)
+      sendUniformName gl.quadShader "postProcessFraction" (realToFrac frac :: Float)
+      sendUniformName gl.quadShader "postProcessEnd"      (fromIntegral $ fromEnum end   :: GLuint)
   checkGL "glDrawElements" $ glDrawElements GL_TRIANGLES gl.quadObject.objVertexCount GL_UNSIGNED_INT nullPtr
 
 drawColor :: GLStuff -> WindowDims -> RenderObject -> V2 Int -> V2 Int -> V4 Float -> IO ()
@@ -2865,7 +2875,11 @@ drawTextLine glStuff dims chars penStart = let
     let penOffset  = fromIntegral <$> V2 (gsrBitmap_left gsr) (gsrBitmap_top gsr)
         penOffsetH = V2 0 (negate tex.textureHeight)
         penAdvance = fromIntegral . (`shiftR` 6) <$> V2 (vX $ gsrAdvance gsr) (vY $ gsrAdvance gsr)
-    drawTexture glStuff dims tex maybeColor (pen + penOffset + penOffsetH) 1
+    drawTexture glStuff QuadDrawSettings
+      { fadeHorizon = False
+      , fxaa = False
+      , postProcess = Nothing
+      } dims tex maybeColor (pen + penOffset + penOffsetH) 1
     drawLoop (pen + penAdvance) rest
   in drawLoop penStart chars
 
@@ -2891,12 +2905,58 @@ drawTimeBox gl dims@(WindowDims _ hWhole) timeLines = do
   forM_ (zip [1..] texLines) $ \(i, texLine) -> do
     drawTextLine gl dims (map (, Nothing) texLine) $ V2 margin $ hWhole - (margin + fontSize) * i
 
+drawVenue :: GLStuff -> WindowDims -> Double -> VenueState Double -> IO ()
+drawVenue gl dims@(WindowDims wWhole hWhole) _time venueState = do
+  texLines <- mapM (prepareText gl (.timeBox))
+    [ T.pack $ show venueState.lighting
+    , T.pack $ show venueState.postProcessing
+    ]
+  forM_ (zip [1..] texLines) $ \(i, texLine) -> do
+    drawTextLine gl dims (map (, Nothing) texLine) $ V2 300 $ hWhole - 50 * i
+
+drawViaFramebuffer :: GLStuff -> WindowDims -> QuadDrawSettings -> (Int, Int, Int, Int) -> IO a -> IO a
+drawViaFramebuffer gl dims@(WindowDims wWhole hWhole) settings (x, y, w, h) drawFn = do
+  glBindFramebuffer GL_FRAMEBUFFER $ case gl.framebuffers of
+    SimpleFramebuffer{..} -> simpleFBO
+    MSAAFramebuffers{..}  -> msaaFBO
+  setFramebufferSize gl.framebuffers
+    (fromIntegral w) (fromIntegral h)
+  glViewport 0 0 (fromIntegral w) (fromIntegral h)
+  glClearColor 0 0 0 0
+  glClear GL_COLOR_BUFFER_BIT
+
+  result <- drawFn
+
+  case gl.framebuffers of
+    SimpleFramebuffer{..} -> do
+
+      glBindFramebuffer GL_FRAMEBUFFER 0
+      glClear GL_DEPTH_BUFFER_BIT
+      glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
+      drawTexture gl settings dims (Texture simpleFBOTex w h) Nothing (V2 x y) 1
+
+    MSAAFramebuffers{..} -> do
+
+      glBindFramebuffer GL_READ_FRAMEBUFFER msaaFBO
+      glBindFramebuffer GL_DRAW_FRAMEBUFFER intermediateFBO
+      glBlitFramebuffer
+        0 0 (fromIntegral w) (fromIntegral h)
+        0 0 (fromIntegral w) (fromIntegral h)
+        GL_COLOR_BUFFER_BIT GL_NEAREST
+
+      glBindFramebuffer GL_FRAMEBUFFER 0
+      glClear GL_DEPTH_BUFFER_BIT
+      glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
+      drawTexture gl settings dims (Texture intermediateFBOTex w h) Nothing (V2 x y) 1
+
+  return result
+
 drawTracks
   :: GLStuff
   -> WindowDims
   -> Double
   -> Double
-  -> (Maybe PreviewBG)
+  -> Maybe PreviewBG
   -> [EliteDrumLayoutHint]
   -> [(T.Text, PreviewTrack)]
   -> Maybe AudioHandle
@@ -2912,9 +2972,14 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAud
 
   glDepthFunc GL_ALWAYS -- turn off z to draw backgrounds + time box
 
+  let waveform = forM_ mAudioHandle $ \audioHandle -> checkGL "draw waveform" $ do
+        waveformData <- audioWaveform audioHandle
+        unless (VS.null waveformData) $ do
+          drawWaveform gl dims waveformData
+
   -- TODO should allow user choice between fit and fill background modes
-  forM_ bg $ \case
-    PreviewBGVideo vi -> case Map.lookup vi gl.videoBGs of
+  case bg of
+    Just (PreviewBGVideo vi) -> case Map.lookup vi gl.videoBGs of
       Just videoHandle -> do
         -- TODO maybe separate out the timestamp updates from drawing
         frameMessage videoHandle.frameLoader $ RequestFrame time
@@ -2932,13 +2997,25 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAud
               return $ Just tex
         forM_ mtex $ drawBackground gl dims BackgroundFit
       Nothing -> return ()
-    PreviewBGImage f -> forM_ (Map.lookup f gl.imageBGs) $ drawBackground gl dims BackgroundFit
-
-  -- Draw waveform visualization
-  forM_ mAudioHandle $ \audioHandle -> checkGL "draw waveform" $ do
-    waveformData <- audioWaveform audioHandle
-    unless (VS.null waveformData) $ do
-      drawWaveform gl dims waveformData
+    Just (PreviewBGImage f) -> forM_ (Map.lookup f gl.imageBGs) $ drawBackground gl dims BackgroundFit
+    Just (PreviewBGVenue venue) -> do
+      let venueState = mapSingleState time venue
+          postProc = case venueState.postProcessing of
+            LightStatic    x               -> (x, 0, x)
+            LightFade      (t1, x) (t2, y) -> (x, (time - t1) / (t2 - t1), y)
+            LightStartFade (_ , x) _       -> (x, 0, x)
+            LightEndFade   _       (_ , y) -> (y, 0, y)
+      drawViaFramebuffer gl dims QuadDrawSettings
+        { fadeHorizon = False
+        , fxaa = False
+        , postProcess = Just postProc
+        } (0, 0, wWhole, hWhole) $ do
+          case gl.gfxConfig.view.background of
+            V4 r g b a -> glClearColor r g b a
+          glClear GL_COLOR_BUFFER_BIT
+          drawVenue gl dims time venueState
+          waveform
+    Nothing -> waveform
 
   glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
   forM_ gl.previewSong $ \psong -> let
@@ -2972,47 +3049,21 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAud
   glDepthFunc GL_LESS
   glClear GL_DEPTH_BUFFER_BIT
 
-  mvps <- forM highwaySpaces $ \((x, y, w, h), (_name, trk)) -> checkGL "draw" $ do
-    glBindFramebuffer GL_FRAMEBUFFER $ case gl.framebuffers of
-      SimpleFramebuffer{..} -> simpleFBO
-      MSAAFramebuffers{..}  -> msaaFBO
-    setFramebufferSize gl.framebuffers
-      (fromIntegral w) (fromIntegral h)
-    glViewport 0 0 (fromIntegral w) (fromIntegral h)
-    glClearColor 0 0 0 0
-    glClear GL_COLOR_BUFFER_BIT
-    mvp <- setUpTrackView gl (WindowDims w h)
-    case trk of
-      PreviewDrums        mode m -> drawDrums      gl time speed mode                   m
-      PreviewDrumsElite layout m -> drawEliteDrums gl time speed (userLayout <> layout) m
-      PreviewFive              m -> drawFive       gl time speed                        m
-      PreviewPG              t m -> drawPG         gl time speed t                      m
-      PreviewMania           p m -> drawMania      gl time speed p                      m
-      PreviewVocal             _ -> return () -- shouldn't happen
-
-    case gl.framebuffers of
-      SimpleFramebuffer{..} -> do
-
-        glBindFramebuffer GL_FRAMEBUFFER 0
-        glClear GL_DEPTH_BUFFER_BIT
-        glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
-        drawTextureFade gl dims (Texture simpleFBOTex w h) Nothing (V2 x y) 1
-
-      MSAAFramebuffers{..} -> do
-
-        glBindFramebuffer GL_READ_FRAMEBUFFER msaaFBO
-        glBindFramebuffer GL_DRAW_FRAMEBUFFER intermediateFBO
-        glBlitFramebuffer
-          0 0 (fromIntegral w) (fromIntegral h)
-          0 0 (fromIntegral w) (fromIntegral h)
-          GL_COLOR_BUFFER_BIT GL_NEAREST
-
-        glBindFramebuffer GL_FRAMEBUFFER 0
-        glClear GL_DEPTH_BUFFER_BIT
-        glViewport 0 0 (fromIntegral wWhole) (fromIntegral hWhole)
-        drawTextureFade gl dims (Texture intermediateFBOTex w h) Nothing (V2 x y) 1
-
-    return mvp
+  mvps <- forM highwaySpaces $ \(xywh@(_x, _y, w, h), (_name, trk)) -> checkGL "draw" $ do
+    drawViaFramebuffer gl dims QuadDrawSettings
+      { fadeHorizon = True
+      , fxaa = True
+      , postProcess = Nothing
+      } xywh $ do
+        mvp <- setUpTrackView gl (WindowDims w h)
+        case trk of
+          PreviewDrums        mode m -> drawDrums      gl time speed mode                   m
+          PreviewDrumsElite layout m -> drawEliteDrums gl time speed (userLayout <> layout) m
+          PreviewFive              m -> drawFive       gl time speed                        m
+          PreviewPG              t m -> drawPG         gl time speed t                      m
+          PreviewMania           p m -> drawMania      gl time speed p                      m
+          PreviewVocal             _ -> return () -- shouldn't happen
+        return mvp
 
   glDepthFunc GL_ALWAYS -- turn off z to draw track labels
 
