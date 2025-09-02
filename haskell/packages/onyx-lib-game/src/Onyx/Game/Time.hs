@@ -265,7 +265,8 @@ data VenueState t = VenueState
     deriving (TimeState) via GenericTimeState (VenueState t)
 
 data LightState t a
-  = LightStatic    a
+  = LightCut       a      a
+  | LightStatic    a
   | LightFade      (t, a) (t, a)
   | LightStartFade (t, a) (t, a)
   | LightEndFade   (t, a) (t, a)
@@ -284,10 +285,12 @@ instance (LightDefault a) => TimeState (LightState t a) where
   before = \case
     LightStartFade (_, x) _ -> LightStatic x
     LightEndFade   x      y -> LightFade x y
+    LightCut       x      _ -> LightStatic x
     ls                      -> ls
   after = \case
     LightStartFade x y      -> LightFade x y
     LightEndFade   _ (_, y) -> LightStatic y
+    LightCut       _ y      -> LightStatic y
     ls                      -> ls
   empty = LightStatic lightDefault
 
@@ -416,10 +419,12 @@ makeLightStates :: (Ord t, Eq a, LightDefault a) => Map.Map t a -> Map.Map t (Li
 makeLightStates = let
   go maybeInitial = \case
     (t1, x) : (t2, y) : rest@((t3, z) : _) | x == y
-      -> (t1, fromMaybe (LightStatic x) maybeInitial)
-        : (t2, LightStartFade (t2, y) (t3, z))
-        : go (Just $ LightEndFade (t2, y) (t3, z)) rest
-    (t, x) : rest -> (t, LightStatic x) : go Nothing rest
+      -> if x == z
+        then go maybeInitial $ (t1, x) : rest
+        else (t1, maybe (LightStatic x) ($ (t1, x)) maybeInitial)
+          : (t2, LightStartFade (t2, y) (t3, z))
+          : go (Just $ LightEndFade (t2, y)) rest
+    (t, x) : rest -> (t, maybe (LightStatic x) ($ (t, x)) maybeInitial) : go (Just $ LightCut x . snd) rest
     [] -> []
   in Map.fromList . go Nothing . Map.toAscList
 

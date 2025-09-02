@@ -3001,6 +3001,7 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAud
     Just (PreviewBGVenue venue) -> do
       let venueState = mapSingleState time venue
           postProc = case venueState.postProcessing of
+            LightCut       _       y       -> (y, 0, y)
             LightStatic    x               -> (x, 0, x)
             LightFade      (t1, x) (t2, y) -> (x, (time - t1) / (t2 - t1), y)
             LightStartFade (_ , x) _       -> (x, 0, x)

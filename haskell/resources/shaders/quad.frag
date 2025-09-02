@@ -254,10 +254,8 @@ vec3 applyPostProcess(vec3 color, uint effectIndex) {
     // V3_photo_negative - photo negative
     return 1.0 - color;
   } else if (effectIndex == 27u) {
-    // V3_ProFilm_mirror_a - mirror effect
-    vec2 mirrorCoord = vec2(1.0 - TexCoord.x, TexCoord.y);
-    vec3 mirroredColor = texture(inTexture, mirrorCoord).rgb;
-    return mix(color, mirroredColor, 0.5);
+    // V3_ProFilm_mirror_a - mirror effect (basic implementation, special blend handled elsewhere)
+    return color;
   } else if (effectIndex == 28u) {
     // V3_ProFilm_psychedelic_blue_red - bright red (light input) on bright blue (dark input)
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
@@ -271,6 +269,106 @@ vec3 applyPostProcess(vec3 color, uint effectIndex) {
 
   // Default case - return original color
   return color;
+}
+
+// Special mirror effect function
+vec3 applyMirrorEffect(vec3 startColor, vec3 endColor, float fraction) {
+  vec2 center = vec2(0.5, 0.5);
+  vec2 pos = TexCoord - center;
+  
+  // Determine mirror strength based on which effect is the mirror
+  float mirrorStrength;
+  bool startIsMirror = (postProcessStart == 27u);
+  bool endIsMirror = (postProcessEnd == 27u);
+  
+  if (startIsMirror && endIsMirror) {
+    // Both are mirror - full mirror always
+    mirrorStrength = 1.0;
+  } else if (startIsMirror) {
+    // Transitioning away from mirror: high fraction = less mirror
+    mirrorStrength = 1.0 - fraction;
+  } else {
+    // Transitioning to mirror: high fraction = more mirror
+    mirrorStrength = fraction;
+  }
+  
+  // Check if we should mirror this pixel
+  bool shouldMirror = false;
+  vec2 mirrorCoord = TexCoord;
+  
+  if (mirrorStrength < 2.0/3.0) {
+    // Phase 1: Rotating radius line from center
+    // 0.0 = pointing right, 1/3 = pointing up, 2/3 = pointing left
+    float lineAngle = mirrorStrength * 3.0 * 3.14159 * 0.5; // 0 to 3π/2
+    
+    // Get pixel angle from center
+    float pixelAngle = atan(pos.y, pos.x);
+    if (pixelAngle < 0.0) pixelAngle += 2.0 * 3.14159; // 0 to 2π
+    
+    // Check if pixel is in swept area (counter-clockwise from right)
+    bool inSweptArea = false;
+    if (lineAngle <= 3.14159) {
+      // Normal case: swept area from 0 to lineAngle
+      inSweptArea = (pixelAngle >= 0.0 && pixelAngle <= lineAngle);
+    } else {
+      // Wrapped case: from 0 to lineAngle, handling wraparound
+      // MT: not sure if this is necessary?
+      float wrappedAngle = lineAngle - 2.0 * 3.14159;
+      inSweptArea = (pixelAngle >= 0.0 && pixelAngle <= lineAngle) ||
+                    (pixelAngle >= wrappedAngle && pixelAngle <= 2.0 * 3.14159);
+    }
+    
+    if (inSweptArea) {
+      shouldMirror = true;
+      // Fix reflection: reflect across line through center
+      vec2 lineDir = vec2(cos(lineAngle), sin(lineAngle));
+      vec2 normal = vec2(-lineDir.y, lineDir.x); // Perpendicular to line
+      float d = dot(pos, normal);
+      vec2 reflected = pos - 2.0 * d * normal;
+      mirrorCoord = center + reflected;
+    }
+  } else {
+    // Phase 2: Full line mirroring (2/3 to 1.0)
+    // At 2/3: horizontal line (top half mirrors bottom half)
+    // At 1.0: vertical line (left half mirrors right half)
+    float t = (mirrorStrength - 2.0/3.0) / (1.0/3.0); // 0 to 1
+    float lineAngle = t * 3.14159 * 0.5; // 0 to π/2 (0° to 90°)
+    
+    // Check which side of the line we're on
+    vec2 lineDir = vec2(cos(lineAngle), sin(lineAngle));
+    vec2 normal = vec2(-lineDir.y, lineDir.x);
+    float d = dot(pos, normal);
+    
+    if (d > 0.0) { // On one side of the line
+      shouldMirror = true;
+      // Reflect across the line
+      vec2 reflected = pos - 2.0 * d * normal;
+      mirrorCoord = center + reflected;
+    }
+  }
+  
+  if (shouldMirror) {
+    // Apply mirroring - mirrored pixels are 100% replaced
+    mirrorCoord = clamp(mirrorCoord, vec2(0.0), vec2(1.0));
+    vec3 mirroredColor = texture(inTexture, mirrorCoord).rgb;
+
+    if (startIsMirror) {
+      // Start is mirror, so use mirrored pixel with start effect
+      // Blend this mirrored result with the end effect
+      vec3 mirroredStart = applyPostProcess(mirroredColor, postProcessStart);
+      vec3 normalEnd = applyPostProcess(mirroredColor, postProcessEnd);
+      return mix(mirroredStart, normalEnd, fraction);
+    } else {
+      // End is mirror, so use mirrored pixel with end effect
+      // Blend start effect with this mirrored result
+      vec3 normalStart = applyPostProcess(mirroredColor, postProcessStart);
+      vec3 mirroredEnd = applyPostProcess(mirroredColor, postProcessEnd);
+      return mix(normalStart, mirroredEnd, fraction);
+    }
+  } else {
+    // No mirroring, normal blend
+    return mix(startColor, endColor, fraction);
+  }
 }
 
 void main()
@@ -292,7 +390,13 @@ void main()
   if (doPostProcess) {
     vec3 startEffect = applyPostProcess(result.rgb, postProcessStart);
     vec3 endEffect = applyPostProcess(result.rgb, postProcessEnd);
-    result.rgb = mix(startEffect, endEffect, postProcessFraction);
+    
+    // Special handling for mirror effect
+    if (postProcessStart == 27u || postProcessEnd == 27u) {
+      result.rgb = applyMirrorEffect(startEffect, endEffect, postProcessFraction);
+    } else {
+      result.rgb = mix(startEffect, endEffect, postProcessFraction);
+    }
   }
 
   // note highway horizon fade
