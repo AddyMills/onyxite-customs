@@ -14,25 +14,30 @@ import           Control.Monad.Codec              (codecOut)
 import           Control.Monad.Extra              (forM, forM_, guard,
                                                    mapMaybeM)
 import           Control.Monad.IO.Class           (MonadIO)
+import           Control.Monad.Trans.Resource     (MonadResource)
 import           Control.Monad.Trans.State.Strict (execState)
 import           Data.Bifunctor                   (second)
 import qualified Data.ByteString                  as B
 import qualified Data.ByteString.Lazy             as BL
 import           Data.Char                        (isSpace, toLower)
+import qualified Data.Conduit.Audio               as CA
 import qualified Data.EventList.Relative.TimeBody as RTB
 import           Data.Foldable                    (toList)
 import           Data.Functor.Identity            (Identity, runIdentity)
 import qualified Data.HashMap.Strict              as HM
+import           Data.List.Extra                  (nubOrd)
 import qualified Data.List.NonEmpty               as NE
 import           Data.Maybe                       (catMaybes, fromMaybe,
                                                    mapMaybe)
 import qualified Data.Text                        as T
 import qualified Data.Text.Encoding               as TE
 import qualified Numeric.NonNegative.Class        as NNC
-import           Onyx.Audio                       (Audio (..), audioIO,
-                                                   audioLengthReadable,
+import           Onyx.Audio                       (Audio (..), applyVolsMono,
+                                                   audioIO, audioLengthReadable,
                                                    audioRateReadable,
-                                                   buildSource', loadAudioInput)
+                                                   buildSource', crossCorrelate,
+                                                   loadAudioInput, sameChannels,
+                                                   standardRate)
 import           Onyx.CloneHero.SNG
 import           Onyx.Encore                      (EncoreInfo (..),
                                                    encoreMidiToFoF,
@@ -40,6 +45,7 @@ import           Onyx.Encore                      (EncoreInfo (..),
 import           Onyx.FeedBack.Load               (chartToBeats, chartToIni,
                                                    chartToMIDI, loadChartFile,
                                                    loadChartReadable)
+import           Onyx.FFMPEG                      (ffSource)
 import           Onyx.FretsOnFire                 (loadPSIni, songToIniContents,
                                                    writePSIni)
 import           Onyx.Guitar                      (HOPOsAlgorithm (HOPOsRBGuitar),
@@ -52,8 +58,9 @@ import           Onyx.MIDI.Common                 (Difficulty (..),
                                                    isNoteEdge)
 import           Onyx.MIDI.Parse                  (getMIDI)
 import           Onyx.MIDI.Read                   (TrackCodec, parseTrack)
-import           Onyx.MIDI.Track.File             (loadMIDIBytes,
+import           Onyx.MIDI.Track.File             (Song (..), loadMIDIBytes,
                                                    parseTrackReport,
+                                                   readMIDIFile, showMIDIFile,
                                                    showMIDIFile', stripTrack)
 import qualified Onyx.MIDI.Track.FiveFret         as G5
 import           Onyx.PhaseShift.Message          (PSMessage (..),
@@ -63,7 +70,7 @@ import           Onyx.StackTrace
 import           Onyx.Util.Binary                 (runGetM)
 import           Onyx.Util.Files                  (fixFileCase)
 import           Onyx.Util.Handle
-import           Onyx.Util.Text.Decode            (encodeLatin1)
+import           Onyx.Util.Text.Decode            (decodeGeneral, encodeLatin1)
 import qualified Sound.MIDI.File                  as F
 import qualified Sound.MIDI.File.Event            as E
 import qualified Sound.MIDI.File.Event.Meta       as Meta
@@ -480,6 +487,133 @@ convertEncoreFoF f info = do
     , location = takeDirectory f
     , format   = FoFEncore
     }
+
+--------------------------------------------------------------------------------
+
+loadMixedAudio :: (MonadResource m) => QuickFoF -> IO (CA.AudioSource m Float)
+loadMixedAudio qfof = let
+  fileList = do
+    (filename, FoFReadable r) <- qfof.files
+    let (name, ext) = textExt filename
+    guard $ elem name
+      [ "song"
+      , "guitar"
+      , "rhythm"
+      , "bass"
+      , "drums", "drums_1", "drums_2", "drums_3", "drums_4"
+      , "vocals", "vocals_1", "vocals_2"
+      , "keys"
+      ]
+    guard $ elem ext [".ogg", ".opus", ".mp3", ".wav", ".flac"]
+    return r
+  in case NE.nonEmpty fileList of
+    Nothing -> return $ CA.silent (CA.Seconds 0) 44100 2
+    Just files -> do
+      src NE.:| srcs <- mapM (ffSource . Left) files
+      let mixed = foldl (\a b -> uncurry CA.mix $ sameChannels (a, b)) src srcs
+      -- TODO apply offset/delay
+      return mixed
+
+combineCharts :: (SendMessage m, MonadIO m) => QuickFoF -> QuickFoF -> StackTraceT m QuickFoF
+combineCharts songBase songNew = do
+  let crossPrep = applyVolsMono [] . CA.takeStart (CA.Seconds 15) . standardRate
+  srcBase <- stackIO $ crossPrep <$> loadMixedAudio songBase
+  srcNew  <- stackIO $ crossPrep <$> loadMixedAudio songNew
+  offset <- stackIO $ crossCorrelate srcBase srcNew
+  stackIO $ print offset
+  baseWithMidi <- convertMIDI songBase
+  newWithMidi  <- convertMIDI songNew
+  let findMidi :: (SendMessage m, MonadIO m) => QuickFoF -> StackTraceT m (F.T B.ByteString)
+      findMidi song = case lookup "notes.mid" song.files of
+        Nothing -> fatal $ "Couldn't find MIDI/.chart in song at " <> song.location
+        Just f  -> getFoFMIDI f
+  baseMidi  <- findMidi baseWithMidi
+  newMidi   <- findMidi newWithMidi
+  finalMidi <- combineMidi offset baseMidi newMidi
+  let combinedMetadata = combineMetadata baseWithMidi.metadata newWithMidi.metadata
+      finalSong :: QuickFoF
+      finalSong = let QuickFoF{..} = baseWithMidi in QuickFoF
+        { files = do
+          (name, f) <- baseWithMidi.files
+          return (name, if name == "notes.mid" then FoFMIDI finalMidi else f)
+        , metadata = combinedMetadata
+        , ..
+        }
+  return finalSong
+
+combineMetadata :: [(T.Text, T.Text)] -> [(T.Text, T.Text)] -> [(T.Text, T.Text)]
+combineMetadata baseMetadata newMetadata = let
+  baseMap = HM.fromList baseMetadata
+  newMap = HM.fromList newMetadata
+
+  -- Helper to get a value from either map
+  getValue key = HM.lookup key baseMap <|> HM.lookup key newMap
+
+  -- Combine charter properties
+  combineCharters = case (HM.lookup "charter" baseMap, HM.lookup "charter" newMap) of
+    (Just base, Just new) | T.strip base /= "" && T.strip new /= "" ->
+      if base == new then [("charter", base)] else [("charter", base <> "; " <> new)]
+    (Just base, _) | T.strip base /= "" -> [("charter", base)]
+    (_, Just new) | T.strip new /= "" -> [("charter", new)]
+    _ -> []
+
+  -- Handle diff_ properties
+  combineDiffs = flip mapMaybe (nubOrd $ HM.keys baseMap ++ HM.keys newMap) $ \key ->
+    if "diff_" `T.isPrefixOf` key
+      then case (HM.lookup key baseMap, HM.lookup key newMap) of
+        (Just base, _) | base /= "-1" -> Just (key, base)
+        (_, Just new) | new /= "-1"   -> Just (key, new)
+        _                             -> Just (key, "-1")
+      else Nothing
+
+  -- Handle special properties (only from base song)
+  specialProps = ["song_length", "preview_start_time", "preview_end_time", "delay"]
+  baseOnlyProps = flip mapMaybe specialProps $ \key ->
+    fmap (key,) (HM.lookup key baseMap)
+
+  -- Handle other properties (excluding charter, diff_, and special properties)
+  otherProps = flip mapMaybe (nubOrd $ HM.keys baseMap ++ HM.keys newMap) $ \key ->
+    if not ("diff_" `T.isPrefixOf` key) && key /= "charter" && not (key `elem` specialProps)
+      then fmap (key,) (getValue key)
+      else Nothing
+
+  in combineCharters ++ combineDiffs ++ baseOnlyProps ++ otherProps
+
+combineMidi :: (SendMessage m) => Double -> F.T B.ByteString -> F.T B.ByteString -> StackTraceT m (F.T B.ByteString)
+combineMidi offset baseMidi newMidi = do
+  -- Convert ByteString MIDI files to Text using decodeGeneral
+  let baseMidiText = fmap decodeGeneral baseMidi
+      newMidiText = fmap decodeGeneral newMidi
+
+  -- Read MIDI files into standard format
+  baseSong <- readMIDIFile baseMidiText
+  newSong <- readMIDIFile newMidiText
+
+  -- Apply tempo track to get new tracks in real time format
+  let newTracksRealTime = map (U.applyTempoTrack newSong.tempos) newSong.tracks
+
+  -- Apply offset to each track, preserving track name events at position 0
+  let applyOffsetToTrack trk = let
+        name = U.trackName trk
+        removeTrackName = RTB.filter $ \case E.MetaEvent (Meta.TrackName _) -> False; _ -> True
+        offsetTrack = if offset >= 0
+          then RTB.delay (U.Seconds $ realToFrac offset) $ removeTrackName trk
+          else U.trackDrop (U.Seconds $ realToFrac $ negate offset) $ removeTrackName trk
+        in maybe id U.setTrackName name offsetTrack
+
+      offsetNewTracksRealTime = map applyOffsetToTrack newTracksRealTime
+
+      -- Convert back to beats using base song's tempo map
+      offsetNewTracks = map (U.unapplyTempoTrack baseSong.tempos) offsetNewTracksRealTime
+
+  -- Combine tracks from base and new MIDI
+  let combinedTracks = baseSong.tracks ++ offsetNewTracks
+      combinedSong = Song baseSong.tempos baseSong.timesigs combinedTracks
+
+  -- Convert back to ByteString MIDI format
+  return $ fmap TE.encodeUtf8 $ showMIDIFile combinedSong
+
+--------------------------------------------------------------------------------
 
 {-
 

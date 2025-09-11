@@ -1,15 +1,16 @@
-{-# LANGUAGE BangPatterns      #-}
-{-# LANGUAGE DeriveFoldable    #-}
-{-# LANGUAGE DeriveFunctor     #-}
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE EmptyCase         #-}
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE MultiWayIf        #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE PatternSynonyms   #-}
-{-# LANGUAGE TupleSections     #-}
-{-# LANGUAGE ViewPatterns      #-}
+{-# LANGUAGE BangPatterns             #-}
+{-# LANGUAGE DeriveFoldable           #-}
+{-# LANGUAGE DeriveFunctor            #-}
+{-# LANGUAGE DeriveTraversable        #-}
+{-# LANGUAGE EmptyCase                #-}
+{-# LANGUAGE FlexibleContexts         #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE LambdaCase               #-}
+{-# LANGUAGE MultiWayIf               #-}
+{-# LANGUAGE OverloadedStrings        #-}
+{-# LANGUAGE PatternSynonyms          #-}
+{-# LANGUAGE TupleSections            #-}
+{-# LANGUAGE ViewPatterns             #-}
 module Onyx.Audio
 ( Audio(..)
 , Edge(..)
@@ -46,6 +47,7 @@ module Onyx.Audio
 , cacheAudio
 , audioToChannelWAVs
 , standardRate
+, crossCorrelate
 ) where
 
 import           Control.Concurrent               (newEmptyMVar, threadDelay,
@@ -89,6 +91,8 @@ import           Data.Word                        (Word8)
 import           Development.Shake                (Action, getShakeOptions,
                                                    need, shakeFiles)
 import           Development.Shake.FilePath       (takeExtension, (-<.>))
+import           Foreign                          (Ptr, castPtr)
+import           Foreign.C                        (CFloat, CInt (..))
 import           Numeric                          (showHex)
 import qualified Numeric.NonNegative.Wrapper      as NN
 import           Onyx.Audio.FSB
@@ -1148,3 +1152,18 @@ cacheAudio src = do
         _ <- liftIO $ tryPutMVar var v
         yield v
     }
+
+foreign import ccall safe "cross_correlate"
+  crossCorrelateC :: Ptr CFloat -> CInt -> Ptr CFloat -> CInt -> IO Double
+
+crossCorrelate :: AudioSource (ResourceT IO) Float -> AudioSource (ResourceT IO) Float -> IO Double
+crossCorrelate src1 src2 = do
+  samples1 <- runResourceT $ C.runConduit $ source src1 .| CL.consume
+  samples2 <- runResourceT $ C.runConduit $ source src2 .| CL.consume
+
+  let !vec1 = V.concat samples1
+      !vec2 = V.concat samples2
+
+  V.unsafeWith vec1 $ \ptr1 ->
+    V.unsafeWith vec2 $ \ptr2 ->
+      crossCorrelateC (castPtr ptr1) (fromIntegral $ V.length vec1) (castPtr ptr2) (fromIntegral $ V.length vec2)

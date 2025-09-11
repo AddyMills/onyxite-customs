@@ -55,11 +55,10 @@ import           Onyx.Amplitude.PS2.TxtBin            (TxtBin (..), dtaToTxtBin,
                                                        getTxtBin, putTxtBin,
                                                        txtBinToDTA,
                                                        txtBinToTracedDTA)
-import           Onyx.Audio                           (Audio (Input),
-                                                       audioLength, audioMD5,
-                                                       buildSource', makeFSB4,
-                                                       makeFSB4', makeXMAFSB3,
-                                                       runAudio,
+import           Onyx.Audio                           (Audio (..), audioLength,
+                                                       audioMD5, buildSource',
+                                                       makeFSB4, makeFSB4',
+                                                       makeXMAFSB3, runAudio,
                                                        sinkMP3PadWithHandle)
 import           Onyx.Audio.FSB                       (FSBExtraMP3 (..),
                                                        FSBExtraXMA (..),
@@ -151,6 +150,7 @@ import           Onyx.PlayStation.PKG                 (PKG (..), loadPKG,
                                                        makePKG, tryDecryptEDATs)
 import qualified Onyx.PowerGig.Crypt                  as PG
 import           Onyx.Project
+import qualified Onyx.QuickConvert.FretsOnFire        as QCH
 import           Onyx.Reaper.Build                    (TuningInfo (..),
                                                        makeReaper)
 import           Onyx.Resources                       (getResourcesPath)
@@ -1445,6 +1445,27 @@ commands =
           Nothing -> when (fin /= fout) $ stackIO $ Dir.copyFile fin fout
         return [fout]
       _ -> fatal "Expected 1 argument (MOGG file)"
+    }
+
+  , Command
+    { commandWord = "ch-combine"
+    , commandDesc = ""
+    , commandUsage = ""
+    , commandList = False
+    , commandRun = \args opts -> case args of
+      [f1, f2] -> do
+        fout <- outputFile opts $ fatal "ch-combine requires --to"
+        QCH.loadQuickFoF f1 >>= \case
+          Nothing -> fatal $ "Couldn't load FoF song: " <> f1
+          Just q1 -> QCH.loadQuickFoF f2 >>= \case
+            Nothing -> fatal $ "Couldn't load FoF song: " <> f2
+            Just q2 -> do
+              combined <- QCH.combineCharts q1 q2
+              stackIO $ case takeExtension fout of
+                ".sng" -> QCH.saveQuickFoFSNG    fout combined
+                _      -> QCH.saveQuickFoFFolder fout combined
+              return [fout]
+      _ -> fatal "Expected 2 arguments: song-base song-new"
     }
 
   ]

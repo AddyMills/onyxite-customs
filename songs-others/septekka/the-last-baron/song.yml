@@ -17,6 +17,12 @@ parts:
       fix-freeform: false
       difficulty:
         tier: 7
+    pro-guitar:
+      tuning:
+        base: bass-4
+        # drop C
+        global: -2
+        offsets: [-2, 0, 0, 0]
   vocal:
     vocal:
       gender: male
