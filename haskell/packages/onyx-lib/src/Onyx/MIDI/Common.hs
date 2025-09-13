@@ -343,7 +343,7 @@ isNoteEdgeCPV = \case
   _ -> Nothing
 
 isNoteEdge :: E.T s -> Maybe (Int, Bool)
-isNoteEdge e = isNoteEdgeCPV e >>= \(_c, p, v) -> return (p, isJust v)
+isNoteEdge e = (\(_c, p, v) -> (p, isJust v)) <$> isNoteEdgeCPV e
 
 unparseBlipCPV :: (Int, Int, Int) -> RTB.T U.Beats (E.T s)
 unparseBlipCPV (c, p, v) = RTB.fromPairList

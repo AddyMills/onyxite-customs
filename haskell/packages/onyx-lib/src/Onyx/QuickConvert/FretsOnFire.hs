@@ -25,9 +25,10 @@ import qualified Data.EventList.Relative.TimeBody as RTB
 import           Data.Foldable                    (toList)
 import           Data.Functor.Identity            (Identity, runIdentity)
 import qualified Data.HashMap.Strict              as HM
+import qualified Data.HashSet                     as HS
 import           Data.List.Extra                  (nubOrd)
 import qualified Data.List.NonEmpty               as NE
-import           Data.Maybe                       (catMaybes, fromMaybe,
+import           Data.Maybe                       (catMaybes, fromMaybe, isJust,
                                                    mapMaybe)
 import qualified Data.Text                        as T
 import qualified Data.Text.Encoding               as TE
@@ -58,10 +59,7 @@ import           Onyx.MIDI.Common                 (Difficulty (..),
                                                    isNoteEdge)
 import           Onyx.MIDI.Parse                  (getMIDI)
 import           Onyx.MIDI.Read                   (TrackCodec, parseTrack)
-import           Onyx.MIDI.Track.File             (Song (..), loadMIDIBytes,
-                                                   parseTrackReport,
-                                                   readMIDIFile, showMIDIFile,
-                                                   showMIDIFile', stripTrack)
+import qualified Onyx.MIDI.Track.File             as F
 import qualified Onyx.MIDI.Track.FiveFret         as G5
 import           Onyx.PhaseShift.Message          (PSMessage (..),
                                                    PhraseID (..), parsePSSysEx,
@@ -71,8 +69,8 @@ import           Onyx.Util.Binary                 (runGetM)
 import           Onyx.Util.Files                  (fixFileCase)
 import           Onyx.Util.Handle
 import           Onyx.Util.Text.Decode            (decodeGeneral, encodeLatin1)
-import qualified Sound.MIDI.File                  as F
-import qualified Sound.MIDI.File.Event            as E
+import qualified Sound.MIDI.File                  as File
+import qualified Sound.MIDI.File.Event            as Event
 import qualified Sound.MIDI.File.Event.Meta       as Meta
 import qualified Sound.MIDI.File.Save             as Save
 import qualified Sound.MIDI.Util                  as U
@@ -114,7 +112,7 @@ data FoFFormatInput
 
 data FoFFile
   = FoFReadable Readable
-  | FoFMIDI (F.T B.ByteString)
+  | FoFMIDI (File.T B.ByteString)
 
 loadQuickFoF :: (MonadIO m, SendMessage m) => FilePath -> StackTraceT m (Maybe QuickFoF)
 loadQuickFoF fin = inside ("Loading: " <> fin) $ let
@@ -203,7 +201,7 @@ convertMIDI q = do
         chart <- chartToBeats <$> loadChartReadable r
         mid <- chartToMIDI chart
         let newName = name <> ".mid"
-        return (newName, FoFMIDI $ fmap TE.encodeUtf8 $ showMIDIFile' mid)
+        return (newName, FoFMIDI $ fmap TE.encodeUtf8 $ F.showMIDIFile' mid)
         -- TODO should also save .chart.bak
       _ -> return pair
     _ -> return pair
@@ -211,7 +209,7 @@ convertMIDI q = do
 
 applyToMIDI
   :: (SendMessage m, MonadIO m)
-  => (F.T B.ByteString -> StackTraceT m (F.T B.ByteString))
+  => (File.T B.ByteString -> StackTraceT m (File.T B.ByteString))
   -> QuickFoF -> StackTraceT m QuickFoF
 applyToMIDI f q = do
   newFiles <- forM q.files $ \pair@(name, file) -> case T.toLower name of
@@ -231,7 +229,7 @@ quickHOPOThreshold q = case lookup "hopo_frequency" q.metadata >>= readMaybe . T
 psTapOpenFormats :: (SendMessage m, MonadIO m) => QuickFoF -> StackTraceT m QuickFoF
 psTapOpenFormats q = applyToMIDI (psOpenFormat (quickHOPOThreshold q) . psTapFormat) q
 
-psTapFormat :: F.T B.ByteString -> F.T B.ByteString
+psTapFormat :: File.T B.ByteString -> File.T B.ByteString
 psTapFormat = (runIdentity .) $ modifyFiveFretTracks $ \_dvn trk -> return $ let
   (notes, trk1) = flip RTB.partitionMaybe trk $ \e -> do
     (104, b) <- isNoteEdge e
@@ -257,11 +255,11 @@ psTapFormat = (runIdentity .) $ modifyFiveFretTracks $ \_dvn trk -> return $ let
         , psEdge       = not $ null active
         }
 
-psOpenFormat :: (SendMessage m) => U.Beats -> F.T B.ByteString -> StackTraceT m (F.T B.ByteString)
+psOpenFormat :: (SendMessage m) => U.Beats -> File.T B.ByteString -> StackTraceT m (File.T B.ByteString)
 psOpenFormat hopoThreshold = modifyFiveFretTracks $ \dvn trk -> let
   isEnhancedOpensEvent = \case
-    E.MetaEvent (Meta.TextEvent s) -> elem s ["[ENHANCED_OPENS]", "ENHANCED_OPENS"]
-    _                              -> False
+    Event.MetaEvent (Meta.TextEvent s) -> elem s ["[ENHANCED_OPENS]", "ENHANCED_OPENS"]
+    _                                  -> False
   in if not $ any isEnhancedOpensEvent $ U.trackTakeZero trk
     then return trk -- nothing to do
     else flip (overParsedFiveFret dvn) trk $ \ft -> let
@@ -273,7 +271,7 @@ psOpenFormat hopoThreshold = modifyFiveFretTracks $ \dvn trk -> let
         }
 
 -- WIP
-tapToHOPO :: (SendMessage m) => U.Beats -> F.T B.ByteString -> StackTraceT m (F.T B.ByteString)
+tapToHOPO :: (SendMessage m) => U.Beats -> File.T B.ByteString -> StackTraceT m (File.T B.ByteString)
 tapToHOPO hopoThreshold = modifyFiveFretTracks $ \dvn trk -> let
   hasTap = True -- TODO look for events
   in if not hasTap
@@ -290,7 +288,7 @@ tapToHOPO hopoThreshold = modifyFiveFretTracks $ \dvn trk -> let
         }
 
 -- WIP
-removeOpenNotes :: (SendMessage m) => U.Beats -> Bool -> F.T B.ByteString -> StackTraceT m (F.T B.ByteString)
+removeOpenNotes :: (SendMessage m) => U.Beats -> Bool -> File.T B.ByteString -> StackTraceT m (File.T B.ByteString)
 removeOpenNotes hopoThreshold detectMuted = modifyFiveFretTracks $ \dvn trk -> let
   hasOpen = True -- TODO look for events
   in if not hasOpen
@@ -310,14 +308,14 @@ removeOpenNotes hopoThreshold detectMuted = modifyFiveFretTracks $ \dvn trk -> l
 
 overParsedFiveFret
   :: (SendMessage m)
-  => F.Division -- midi resolution
+  => File.Division -- midi resolution
   -> (G5.FiveTrack U.Beats -> G5.FiveTrack U.Beats)
-  -> RTB.T E.ElapsedTime (E.T B.ByteString)
-  -> StackTraceT m (RTB.T E.ElapsedTime (E.T B.ByteString))
+  -> RTB.T Event.ElapsedTime (Event.T B.ByteString)
+  -> StackTraceT m (RTB.T Event.ElapsedTime (Event.T B.ByteString))
 overParsedFiveFret dvn f trk = do
   res <- case dvn of
-    F.Ticks tks -> return tks
-    _           -> fatal "Unsupported MIDI file using non-ticks (SMPTE?) timing"
+    File.Ticks tks -> return tks
+    _              -> fatal "Unsupported MIDI file using non-ticks (SMPTE?) timing"
   let trk'
         = RTB.mapTime (\tks -> realToFrac tks / realToFrac res)
         $ RTB.mapBody (fmap TE.decodeLatin1) trk
@@ -326,7 +324,7 @@ overParsedFiveFret dvn f trk = do
         = maybe id U.setTrackName name
         . RTB.discretize . RTB.mapTime (* realToFrac res)
         . RTB.mapBody (fmap encodeLatin1)
-  five <- parseTrackReport $ stripTrack trk'
+  five <- F.parseTrackReport $ F.stripTrack trk'
   let parseTrack' :: TrackCodec (PureLog Identity) U.Beats (G5.FiveTrack U.Beats)
       parseTrack' = parseTrack
   return
@@ -335,14 +333,14 @@ overParsedFiveFret dvn f trk = do
 
 modifyFiveFretTracks
   :: (Monad m)
-  => (F.Division -> RTB.T E.ElapsedTime (E.T B.ByteString) -> m (RTB.T E.ElapsedTime (E.T B.ByteString)))
-  -> F.T B.ByteString
-  -> m (F.T B.ByteString)
-modifyFiveFretTracks f (F.Cons typ dvn trks)
-  = fmap (F.Cons typ dvn) $ forM trks $ \trk ->
+  => (File.Division -> RTB.T Event.ElapsedTime (Event.T B.ByteString) -> m (RTB.T Event.ElapsedTime (Event.T B.ByteString)))
+  -> File.T B.ByteString
+  -> m (File.T B.ByteString)
+modifyFiveFretTracks f (File.Cons typ dvn trks)
+  = fmap (File.Cons typ dvn) $ forM trks $ \trk ->
     if isFiveFretTrack trk then f dvn trk else return trk
 
-isFiveFretTrack :: (NNC.C t) => RTB.T t (E.T B.ByteString) -> Bool
+isFiveFretTrack :: (NNC.C t) => RTB.T t (Event.T B.ByteString) -> Bool
 isFiveFretTrack trk = case U.trackName trk of
   Nothing   -> False
   Just name -> elem name
@@ -360,10 +358,10 @@ getFoFReadables q = flip map q.files $ \(name, file) -> let
     FoFMIDI     m -> makeHandle (T.unpack name) $ byteStringSimpleHandle $ Save.toByteString m
   in (name, r)
 
-getFoFMIDI :: (SendMessage m, MonadIO m) => FoFFile -> StackTraceT m (F.T B.ByteString)
+getFoFMIDI :: (SendMessage m, MonadIO m) => FoFFile -> StackTraceT m (File.T B.ByteString)
 getFoFMIDI = \case
   FoFMIDI     m -> return m
-  FoFReadable r -> loadMIDIBytes r
+  FoFReadable r -> F.loadMIDIBytes r
 
 saveQuickFoFSNG :: FilePath -> QuickFoF -> IO ()
 saveQuickFoFSNG out q = do
@@ -523,13 +521,18 @@ combineCharts songBase songNew = do
   stackIO $ print offset
   baseWithMidi <- convertMIDI songBase
   newWithMidi  <- convertMIDI songNew
-  let findMidi :: (SendMessage m, MonadIO m) => QuickFoF -> StackTraceT m (F.T B.ByteString)
+  let findMidi :: (SendMessage m, MonadIO m) => QuickFoF -> StackTraceT m (File.T B.ByteString)
       findMidi song = case lookup "notes.mid" song.files of
         Nothing -> fatal $ "Couldn't find MIDI/.chart in song at " <> song.location
         Just f  -> getFoFMIDI f
   baseMidi  <- findMidi baseWithMidi
   newMidi   <- findMidi newWithMidi
-  finalMidi <- combineMidi offset baseMidi newMidi
+  finalMidi <- combineMidi
+    offset
+    (songDetectTracks baseWithMidi.metadata baseMidi)
+    baseMidi
+    (songDetectTracks newWithMidi.metadata newMidi)
+    newMidi
   let combinedMetadata = combineMetadata baseWithMidi.metadata newWithMidi.metadata
       finalSong :: QuickFoF
       finalSong = let QuickFoF{..} = baseWithMidi in QuickFoF
@@ -540,6 +543,70 @@ combineCharts songBase songNew = do
         , ..
         }
   return finalSong
+
+data FoFTrackInfo = FoFTrackInfo
+  { trackNames    :: [T.Text]
+  , difficultyKey :: T.Text
+  }
+
+detectTrackMapping :: HM.HashMap F.PartName [FoFTrackInfo]
+detectTrackMapping = HM.fromList
+  [ (F.PartGuitar,
+    [ FoFTrackInfo ["PART GUITAR"] "diff_guitar"
+    , FoFTrackInfo ["PART GUITAR GHL"] "diff_guitarghl"
+    , FoFTrackInfo ["PART REAL_GUITAR"] "diff_guitar_real"
+    , FoFTrackInfo ["PART REAL_GUITAR_22"] "diff_guitar_real_22"
+    , FoFTrackInfo ["PAD GUITAR"] "diff_guitar_pad"
+    ])
+  , (F.PartBass,
+    [ FoFTrackInfo ["PART BASS"] "diff_bass"
+    , FoFTrackInfo ["PART BASS GHL"] "diff_bassghl"
+    , FoFTrackInfo ["PART REAL_BASS"] "diff_bass_real"
+    , FoFTrackInfo ["PART REAL_BASS_22"] "diff_bass_real_22"
+    , FoFTrackInfo ["PAD BASS"] "diff_bass_pad"
+    ])
+  , (F.PartDrums,
+    [ FoFTrackInfo ["PART DRUMS", "PART DRUMS_2X", "PART DRUM"] "diff_drums"
+    , FoFTrackInfo ["PART REAL_DRUMS_PS"] "diff_drums_real"
+    , FoFTrackInfo ["PART ELITE_DRUMS"] "diff_drums_elite" -- diff key tentative
+    , FoFTrackInfo ["PAD DRUMS"] "diff_drums_pad"
+    ])
+  , (F.PartKeys,
+    [ FoFTrackInfo ["PART KEYS"] "diff_keys"
+    , FoFTrackInfo ["PART REAL_KEYS_E", "PART REAL_KEYS_M", "PART REAL_KEYS_H", "PART REAL_KEYS_X"] "diff_keys_real"
+    , FoFTrackInfo ["PAD KEYS"] "diff_keys_pad"
+    ])
+  , (F.PartVocal,
+    [ FoFTrackInfo ["PART VOCALS"] "diff_vocals"
+    , FoFTrackInfo ["HARM1", "HARM2", "HARM3"] "diff_vocals_harm"
+    , FoFTrackInfo ["PAD VOCALS"] "diff_vocals_pad"
+    ])
+  , (F.PartName "rhythm",
+    [ FoFTrackInfo ["PART RHYTHM"] "diff_rhythm"
+    -- probably 6-fret / pro / pad?
+    ])
+  , (F.PartName "guitar-coop",
+    [ FoFTrackInfo ["PART GUITAR COOP"] "diff_guitar_coop"
+    -- probably 6-fret / pro / pad?
+    ])
+  ]
+
+songDetectTracks :: [(T.Text, T.Text)] -> File.T B.ByteString -> [T.Text]
+songDetectTracks metadata (File.Cons _ _ trks) = let
+  metadataMap = HM.fromList metadata
+  tracksWithNotes = nubOrd $ do
+    trk <- trks
+    name <- decodeGeneral <$> toList (U.trackName trk)
+    guard $ any (\e -> isJust $ isNoteEdge e) trk
+    return name
+  nameToDiff = HM.fromList $ do
+    FoFTrackInfo names diff <- concat $ toList detectTrackMapping
+    name <- names
+    return (name, diff)
+  isAllowedInMetadata name = case HM.lookup name nameToDiff >>= \k -> HM.lookup k metadataMap of
+    Just "-1" -> False
+    _         -> True
+  in filter isAllowedInMetadata tracksWithNotes
 
 combineMetadata :: [(T.Text, T.Text)] -> [(T.Text, T.Text)] -> [(T.Text, T.Text)]
 combineMetadata baseMetadata newMetadata = let
@@ -579,23 +646,37 @@ combineMetadata baseMetadata newMetadata = let
 
   in combineCharters ++ combineDiffs ++ baseOnlyProps ++ otherProps
 
-combineMidi :: (SendMessage m) => Double -> F.T B.ByteString -> F.T B.ByteString -> StackTraceT m (F.T B.ByteString)
-combineMidi offset baseMidi newMidi = do
+combineMidi
+  :: (SendMessage m)
+  => Double
+  -> [T.Text]
+  -> File.T B.ByteString
+  -> [T.Text]
+  -> File.T B.ByteString
+  -> StackTraceT m (File.T B.ByteString)
+combineMidi offset baseTracks baseMidi newTracks newMidi = do
   -- Convert ByteString MIDI files to Text using decodeGeneral
   let baseMidiText = fmap decodeGeneral baseMidi
       newMidiText = fmap decodeGeneral newMidi
 
   -- Read MIDI files into standard format
-  baseSong <- readMIDIFile baseMidiText
-  newSong <- readMIDIFile newMidiText
+  baseSong <- F.readMIDIFile baseMidiText
+  newSong <- F.readMIDIFile newMidiText
+
+  let baseTrackSet = HS.fromList $ "EVENTS" : baseTracks
+      addedTrackSet = HS.fromList newTracks `HS.difference` baseTrackSet
+      allowedNewTrack = maybe False (\name -> HS.member name addedTrackSet) . U.trackName
+      allowedBaseTrack = maybe False (\name -> HS.member name baseTrackSet) . U.trackName
 
   -- Apply tempo track to get new tracks in real time format
-  let newTracksRealTime = map (U.applyTempoTrack newSong.tempos) newSong.tracks
+  let newTracksRealTime
+        = filter allowedNewTrack
+        $ map (U.applyTempoTrack newSong.tempos) newSong.tracks
 
   -- Apply offset to each track, preserving track name events at position 0
   let applyOffsetToTrack trk = let
         name = U.trackName trk
-        removeTrackName = RTB.filter $ \case E.MetaEvent (Meta.TrackName _) -> False; _ -> True
+        removeTrackName = RTB.filter $ \case Event.MetaEvent (Meta.TrackName _) -> False; _ -> True
         offsetTrack = if offset >= 0
           then RTB.delay (U.Seconds $ realToFrac offset) $ removeTrackName trk
           else U.trackDrop (U.Seconds $ realToFrac $ negate offset) $ removeTrackName trk
@@ -607,11 +688,18 @@ combineMidi offset baseMidi newMidi = do
       offsetNewTracks = map (U.unapplyTempoTrack baseSong.tempos) offsetNewTracksRealTime
 
   -- Combine tracks from base and new MIDI
-  let combinedTracks = baseSong.tracks ++ offsetNewTracks
-      combinedSong = Song baseSong.tempos baseSong.timesigs combinedTracks
+  let combinedTracks = filter allowedBaseTrack baseSong.tracks ++ offsetNewTracks
+      combinedSong = F.Song baseSong.tempos baseSong.timesigs combinedTracks
 
   -- Convert back to ByteString MIDI format
-  return $ fmap TE.encodeUtf8 $ showMIDIFile combinedSong
+  return $ fmap TE.encodeUtf8 $ F.showMIDIFile combinedSong
+
+{-
+TODO remaining combineMidi issues:
+- trackDrop needs to be smarter, don't chop only the start of a note, push text events forward rather than drop them
+- in particular text events like drums ENABLE_CHART_DYNAMICS and guitar ENHANCED_OPENS need to be preserved at time 0
+- need to force all strum/hopo/tap notes
+-}
 
 --------------------------------------------------------------------------------
 
