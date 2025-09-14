@@ -107,6 +107,11 @@ parseTrackReport trk = do
     _                    -> warn $ "Unrecognized MIDI event: " ++ show e
   return parsedTrk
 
+parseTrackIgnoreWarnings :: (ParseTrack trk) => RTB.T U.Beats (E.T T.Text) -> Maybe (trk U.Beats)
+parseTrackIgnoreWarnings trk = case runPureLog $ runStackTraceT $ parseTrackReport trk of
+  (Right parsed, _) -> Just parsed
+  _                 -> Nothing
+
 fileTrack :: (SendMessage m, ParseTrack trk) => NonEmpty T.Text -> FileCodec m U.Beats (trk U.Beats)
 fileTrack (name :| otherNames) = Codec
   { codecIn = do
@@ -117,16 +122,20 @@ fileTrack (name :| otherNames) = Codec
     lift $ put rest
     inside ("Parsing track: " <> T.unpack name') $ parseTrackReport match'
   , codecOut = fmapArg $ \trk -> let
-    evs = (`execState` RTB.empty) $ codecOut (forcePure parseTrack) trk
+    evs = showTrack trk
     in unless (RTB.null evs) $ tell [U.setTrackName name evs]
   } where
     matchTrack trk = case U.trackName trk of
       Nothing -> False
       Just n  -> elem n $ name : otherNames
-    forcePure
-      :: TrackCodec (PureLog Identity) U.Beats (trk U.Beats)
-      -> TrackCodec (PureLog Identity) U.Beats (trk U.Beats)
-    forcePure = id
+
+showTrack :: (ParseTrack trk) => trk U.Beats -> RTB.T U.Beats (E.T T.Text)
+showTrack trk = let
+  forcePure
+    :: TrackCodec (PureLog Identity) U.Beats (trk U.Beats)
+    -> TrackCodec (PureLog Identity) U.Beats (trk U.Beats)
+  forcePure = id
+  in execState (codecOut (forcePure parseTrack) trk) RTB.empty
 
 class HasEvents f where
   getEventsTrack :: f t -> EventsTrack t

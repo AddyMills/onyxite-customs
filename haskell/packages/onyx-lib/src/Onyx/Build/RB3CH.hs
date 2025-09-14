@@ -604,22 +604,14 @@ processMIDI target songYaml origInput mixMode getAudioLength = inside "Processin
       guitarGHL = case getPart guitarPart songYaml >>= (.ghl) of
         Nothing  -> mempty
         Just ghl -> sixEachDiff
-          ( \sd ->
-            emitGuitar6
-          . applyForces (getForces6 sd)
-          . strumHOPOTap HOPOsRBGuitar (fromIntegral ghl.hopoThreshold / 480)
-          . edgeBlips_ minSustainLengthRB
-          $ sixGems sd
+          ( emitGuitar6
+          . computeSixFretSHT HOPOsRBGuitar (fromIntegral ghl.hopoThreshold / 480)
           ) (F.getFlexPart guitarPart trks).onyxPartSix
       bassGHL = case getPart bassPart songYaml >>= (.ghl) of
         Nothing  -> mempty
         Just ghl -> sixEachDiff
-          ( \sd ->
-            emitGuitar6
-          . applyForces (getForces6 sd)
-          . strumHOPOTap HOPOsRBGuitar (fromIntegral ghl.hopoThreshold / 480)
-          . edgeBlips_ minSustainLengthRB
-          $ sixGems sd
+          ( emitGuitar6
+          . computeSixFretSHT HOPOsRBGuitar (fromIntegral ghl.hopoThreshold / 480)
           ) (F.getFlexPart bassPart trks).onyxPartSix
 
       keysPart = case target of

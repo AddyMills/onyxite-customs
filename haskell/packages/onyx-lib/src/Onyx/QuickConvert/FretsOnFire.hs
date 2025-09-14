@@ -49,11 +49,7 @@ import           Onyx.FeedBack.Load               (chartToBeats, chartToIni,
 import           Onyx.FFMPEG                      (ffSource)
 import           Onyx.FretsOnFire                 (loadPSIni, songToIniContents,
                                                    writePSIni)
-import           Onyx.Guitar                      (HOPOsAlgorithm (HOPOsRBGuitar),
-                                                   applyStatus,
-                                                   computeFiveFretSHT,
-                                                   emitGuitar5, emitGuitar5PS,
-                                                   noOpenNotes)
+import qualified Onyx.Guitar                      as G
 import           Onyx.MIDI.Common                 (Difficulty (..),
                                                    StrumHOPOTap (..),
                                                    isNoteEdge)
@@ -61,6 +57,7 @@ import           Onyx.MIDI.Parse                  (getMIDI)
 import           Onyx.MIDI.Read                   (TrackCodec, parseTrack)
 import qualified Onyx.MIDI.Track.File             as F
 import qualified Onyx.MIDI.Track.FiveFret         as G5
+import qualified Onyx.MIDI.Track.SixFret          as G6
 import           Onyx.PhaseShift.Message          (PSMessage (..),
                                                    PhraseID (..), parsePSSysEx,
                                                    unparsePSSysEx)
@@ -162,7 +159,11 @@ loadQuickFoF fin = inside ("Loading: " <> fin) $ let
           , location = fin
           , format   = FoFFormat FoFSNG
           }
-      else return Nothing
+      else do
+        iniPath <- fixFileCase $ fin </> "song.ini"
+        stackIO (doesFileExist iniPath) >>= \case
+          True  -> loadQuickFoF iniPath
+          False -> return Nothing
 
 textExt :: T.Text -> (T.Text, T.Text)
 textExt x = let
@@ -247,7 +248,7 @@ psTapFormat = (runIdentity .) $ modifyFiveFretTracks $ \_dvn trk -> return $ let
       _           -> Nothing
   in if RTB.null notes
     then trk -- nothing to do
-    else RTB.merge trk2 $ flip fmap (applyStatus events events) $ \(active, _) ->
+    else RTB.merge trk2 $ flip fmap (G.applyStatus events events) $ \(active, _) ->
       -- only emit all difficulties sysex
       unparsePSSysEx PSMessage
         { psDifficulty = Nothing
@@ -264,7 +265,7 @@ psOpenFormat hopoThreshold = modifyFiveFretTracks $ \dvn trk -> let
     then return trk -- nothing to do
     else flip (overParsedFiveFret dvn) trk $ \ft -> let
       G5.FiveTrack{..} = ft
-      eachDiff = emitGuitar5PS . computeFiveFretSHT HOPOsRBGuitar hopoThreshold
+      eachDiff = G.emitGuitar5PS . G.computeFiveFretSHT G.HOPOsRBGuitar hopoThreshold
       in G5.FiveTrack
         { fiveDifficulties = fmap eachDiff ft.fiveDifficulties
         , ..
@@ -279,9 +280,9 @@ tapToHOPO hopoThreshold = modifyFiveFretTracks $ \dvn trk -> let
     else flip (overParsedFiveFret dvn) trk $ \ft -> let
       G5.FiveTrack{..} = ft
       eachDiff
-        = emitGuitar5PS -- should this be an option? probably always PS format opens here
+        = G.emitGuitar5PS -- should this be an option? probably always PS format opens here
         . fmap (\((color, sht), len) -> ((color, case sht of Tap -> HOPO; _ -> sht), len))
-        . computeFiveFretSHT HOPOsRBGuitar hopoThreshold
+        . G.computeFiveFretSHT G.HOPOsRBGuitar hopoThreshold
       in G5.FiveTrack
         { fiveDifficulties = fmap eachDiff ft.fiveDifficulties
         , ..
@@ -296,11 +297,11 @@ removeOpenNotes hopoThreshold detectMuted = modifyFiveFretTracks $ \dvn trk -> l
     else flip (overParsedFiveFret dvn) trk $ \ft -> let
       G5.FiveTrack{..} = ft
       eachDiff
-        = emitGuitar5 -- open format doesn't matter since there are none
+        = G.emitGuitar5 -- open format doesn't matter since there are none
         . fmap (\((color, sht), len) -> ((Just color, sht), len))
-        . noOpenNotes detectMuted
+        . G.noOpenNotes detectMuted
         -- TODO we probably need to remove all extended sustains here
-        . computeFiveFretSHT HOPOsRBGuitar hopoThreshold
+        . G.computeFiveFretSHT G.HOPOsRBGuitar hopoThreshold
       in G5.FiveTrack
         { fiveDifficulties = fmap eachDiff ft.fiveDifficulties
         , ..
@@ -519,6 +520,11 @@ combineCharts songBase songNew = do
   srcNew  <- stackIO $ crossPrep <$> loadMixedAudio songNew
   offset <- stackIO $ crossCorrelate srcBase srcNew
   stackIO $ print offset
+  -- TODO maybe we should also try to correlate the ends of the song,
+  -- and warn if the result is different from the start of the song,
+  -- as this probably means the two charts have different speed audio or something.
+  -- maybe also want to use smarter methods of detecting when two charts have
+  -- very different lengths and handle that better to have a better shot at proper sync
   baseWithMidi <- convertMIDI songBase
   newWithMidi  <- convertMIDI songNew
   let findMidi :: (SendMessage m, MonadIO m) => QuickFoF -> StackTraceT m (File.T B.ByteString)
@@ -529,6 +535,7 @@ combineCharts songBase songNew = do
   newMidi   <- findMidi newWithMidi
   finalMidi <- combineMidi
     offset
+    (quickHOPOThreshold newWithMidi)
     (songDetectTracks baseWithMidi.metadata baseMidi)
     baseMidi
     (songDetectTracks newWithMidi.metadata newMidi)
@@ -583,11 +590,11 @@ detectTrackMapping = HM.fromList
     ])
   , (F.PartName "rhythm",
     [ FoFTrackInfo ["PART RHYTHM"] "diff_rhythm"
-    -- probably 6-fret / pro / pad?
+    , FoFTrackInfo ["PART RHYTHM GHL"] "diff_rhythm_ghl"
     ])
   , (F.PartName "guitar-coop",
     [ FoFTrackInfo ["PART GUITAR COOP"] "diff_guitar_coop"
-    -- probably 6-fret / pro / pad?
+    , FoFTrackInfo ["PART GUITAR COOP GHL"] "diff_guitar_coop_ghl"
     ])
   ]
 
@@ -630,6 +637,7 @@ combineMetadata baseMetadata newMetadata = let
       then case (HM.lookup key baseMap, HM.lookup key newMap) of
         (Just base, _) | base /= "-1" -> Just (key, base)
         (_, Just new) | new /= "-1"   -> Just (key, new)
+        -- TODO we may want smarter handling if it's -1 in one song and missing in the other!
         _                             -> Just (key, "-1")
       else Nothing
 
@@ -646,15 +654,69 @@ combineMetadata baseMetadata newMetadata = let
 
   in combineCharters ++ combineDiffs ++ baseOnlyProps ++ otherProps
 
+-- If this is a 5-fret or 6-fret track, replaces just the force strum/hopo/tap events to cover all notes.
+forceSHT :: U.Beats -> RTB.T U.Beats (Event.T T.Text) -> RTB.T U.Beats (Event.T T.Text)
+forceSHT hopoThreshold track = let
+  names5 = ["PART GUITAR", "PART BASS", "PART KEYS", "PART RHYTHM", "PART GUITAR COOP"]
+  names6 = ["PART GUITAR GHL", "PART BASS GHL", "PART RHYTHM GHL", "PART GUITAR COOP GHL"]
+  -- True if event is a force hopo/strum/tap note edge, or a force tap sysex event
+  isForceEvent event = case isNoteEdge event of
+    Just (p, _) -> elem p [65, 66, 77, 78, 89, 90, 101, 102, 104]
+    Nothing     -> case parsePSSysEx event of
+      Just msg -> msg.psPhraseID == TapNotes
+      Nothing  -> False
+  replaceEvents newTrack = RTB.merge
+    (RTB.filter (not . isForceEvent) track   )
+    (RTB.filter isForceEvent         newTrack)
+  in case U.trackName track of
+    Just name
+      | elem name names5 -> case F.parseTrackIgnoreWarnings track of
+        Nothing        -> track -- warn or something?
+        Just fiveTrack -> let
+          allForces = fiveTrack
+            { G5.fiveDifficulties = reforce <$> fiveTrack.fiveDifficulties
+            }
+          -- probably don't care about using keys algo for PART KEYS
+          reforce = G.emitGuitar5 . G.computeFiveFretSHT G.HOPOsRBGuitar hopoThreshold
+          newTrack = F.showTrack allForces
+          in replaceEvents newTrack
+      | elem name names6 -> case F.parseTrackIgnoreWarnings track of
+        Nothing        -> track -- warn or something?
+        Just sixTrack -> let
+          allForces = sixTrack
+            { G6.sixDifficulties = reforce <$> sixTrack.sixDifficulties
+            }
+          reforce = G.emitGuitar6 . G.computeSixFretSHT G.HOPOsRBGuitar hopoThreshold
+          newTrack = F.showTrack allForces
+          in replaceEvents newTrack
+    _ -> track
+
+{-
+TODO remaining combineMidi issues:
+- trackDrop needs to be smarter, don't chop only the start of a note, push text events forward rather than drop them
+- in particular text events like drums ENABLE_CHART_DYNAMICS and guitar ENHANCED_OPENS need to be preserved at time 0
+-}
+
+-- Pads the start with time, but pulls time-0 meta+sysex events back so they're still at time 0.
+syncDelay :: (NNC.C t) => t -> RTB.T t (Event.T T.Text) -> RTB.T t (Event.T T.Text)
+syncDelay = RTB.delay -- TODO replace this
+
+-- Drops time from the start, but moves meta+sysex events forward to time 0,
+-- and if a note would be split, moves the note-on forward to just shrink the note length.
+-- (probably similar for sysex edges, make sure on/off are processed right)
+syncDrop :: (NNC.C t) => t -> RTB.T t (Event.T T.Text) -> RTB.T t (Event.T T.Text)
+syncDrop = U.trackDrop -- TODO replace this
+
 combineMidi
   :: (SendMessage m)
   => Double
+  -> U.Beats
   -> [T.Text]
   -> File.T B.ByteString
   -> [T.Text]
   -> File.T B.ByteString
   -> StackTraceT m (File.T B.ByteString)
-combineMidi offset baseTracks baseMidi newTracks newMidi = do
+combineMidi offset hopoThreshold baseTracks baseMidi newTracks newMidi = do
   -- Convert ByteString MIDI files to Text using decodeGeneral
   let baseMidiText = fmap decodeGeneral baseMidi
       newMidiText = fmap decodeGeneral newMidi
@@ -663,7 +725,7 @@ combineMidi offset baseTracks baseMidi newTracks newMidi = do
   baseSong <- F.readMIDIFile baseMidiText
   newSong <- F.readMIDIFile newMidiText
 
-  let baseTrackSet = HS.fromList $ "EVENTS" : baseTracks
+  let baseTrackSet = HS.fromList $ "EVENTS" : "VENUE" : baseTracks
       addedTrackSet = HS.fromList newTracks `HS.difference` baseTrackSet
       allowedNewTrack = maybe False (\name -> HS.member name addedTrackSet) . U.trackName
       allowedBaseTrack = maybe False (\name -> HS.member name baseTrackSet) . U.trackName
@@ -671,15 +733,15 @@ combineMidi offset baseTracks baseMidi newTracks newMidi = do
   -- Apply tempo track to get new tracks in real time format
   let newTracksRealTime
         = filter allowedNewTrack
-        $ map (U.applyTempoTrack newSong.tempos) newSong.tracks
+        $ map (U.applyTempoTrack newSong.tempos . forceSHT hopoThreshold) newSong.tracks
 
   -- Apply offset to each track, preserving track name events at position 0
   let applyOffsetToTrack trk = let
         name = U.trackName trk
         removeTrackName = RTB.filter $ \case Event.MetaEvent (Meta.TrackName _) -> False; _ -> True
         offsetTrack = if offset >= 0
-          then RTB.delay (U.Seconds $ realToFrac offset) $ removeTrackName trk
-          else U.trackDrop (U.Seconds $ realToFrac $ negate offset) $ removeTrackName trk
+          then syncDelay (U.Seconds $ realToFrac offset) $ removeTrackName trk
+          else syncDrop (U.Seconds $ realToFrac $ negate offset) $ removeTrackName trk
         in maybe id U.setTrackName name offsetTrack
 
       offsetNewTracksRealTime = map applyOffsetToTrack newTracksRealTime
@@ -693,13 +755,6 @@ combineMidi offset baseTracks baseMidi newTracks newMidi = do
 
   -- Convert back to ByteString MIDI format
   return $ fmap TE.encodeUtf8 $ F.showMIDIFile combinedSong
-
-{-
-TODO remaining combineMidi issues:
-- trackDrop needs to be smarter, don't chop only the start of a note, push text events forward rather than drop them
-- in particular text events like drums ENABLE_CHART_DYNAMICS and guitar ENHANCED_OPENS need to be preserved at time 0
-- need to force all strum/hopo/tap notes
--}
 
 --------------------------------------------------------------------------------
 

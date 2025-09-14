@@ -39,6 +39,12 @@ computeFiveFretNotes fd
   $ applyStatus1 False fd.fiveOpen
   $ edgeBlips_ minSustainLengthRB fd.fiveGems
 
+computeSixFretSHT :: HOPOsAlgorithm -> U.Beats -> SixDifficulty U.Beats -> RTB.T U.Beats ((Maybe Fret, StrumHOPOTap), Maybe U.Beats)
+computeSixFretSHT algo hopoThreshold sd
+  = applyForces (getForces6 sd)
+  $ strumHOPOTap algo hopoThreshold
+  $ edgeBlips_ minSustainLengthRB sd.sixGems
+
 data HOPOsAlgorithm
   = HOPOsRBGuitar
   | HOPOsRBKeys
