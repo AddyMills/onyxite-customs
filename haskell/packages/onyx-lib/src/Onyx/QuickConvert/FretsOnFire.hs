@@ -26,7 +26,8 @@ import           Data.Foldable                    (toList)
 import           Data.Functor.Identity            (Identity, runIdentity)
 import qualified Data.HashMap.Strict              as HM
 import qualified Data.HashSet                     as HS
-import           Data.List.Extra                  (nubOrd)
+import           Data.List.Extra                  (nubOrd, partition)
+import           Data.List.HT                     (partitionMaybe)
 import qualified Data.List.NonEmpty               as NE
 import           Data.Maybe                       (catMaybes, fromMaybe, isJust,
                                                    mapMaybe)
@@ -52,7 +53,7 @@ import           Onyx.FretsOnFire                 (loadPSIni, songToIniContents,
 import qualified Onyx.Guitar                      as G
 import           Onyx.MIDI.Common                 (Difficulty (..),
                                                    StrumHOPOTap (..),
-                                                   isNoteEdge)
+                                                   isNoteEdge, isNoteEdgeCPV)
 import           Onyx.MIDI.Parse                  (getMIDI)
 import           Onyx.MIDI.Read                   (TrackCodec, parseTrack)
 import qualified Onyx.MIDI.Track.File             as F
@@ -691,21 +692,55 @@ forceSHT hopoThreshold track = let
           in replaceEvents newTrack
     _ -> track
 
-{-
-TODO remaining combineMidi issues:
-- trackDrop needs to be smarter, don't chop only the start of a note, push text events forward rather than drop them
-- in particular text events like drums ENABLE_CHART_DYNAMICS and guitar ENHANCED_OPENS need to be preserved at time 0
--}
-
 -- Pads the start with time, but pulls time-0 meta+sysex events back so they're still at time 0.
 syncDelay :: (NNC.C t) => t -> RTB.T t (Event.T T.Text) -> RTB.T t (Event.T T.Text)
-syncDelay = RTB.delay -- TODO replace this
+syncDelay t trk = let
+  (zero, rest) = U.trackSplitZero trk
+  (match, other) = partition isMetaSysEx zero
+  isMetaSysEx = \case
+    Event.MetaEvent      {} -> True
+    Event.SystemExclusive{} -> True
+    _                       -> False
+  in U.trackGlueZero match $ RTB.delay t $ U.trackGlueZero other rest
+
+condenseEvents :: (NNC.C t, Ord s) => RTB.T t (Event.T s) -> [Event.T s]
+condenseEvents = go [] . toList . RTB.normalize where
+  -- normalize should put note-off (both 0x8 and 0x9-velocity-0) before simultaneous note-on
+  go cur []       = cur
+  go cur (x : xs) = case x of
+    Event.MetaEvent{} -> go (x : cur) xs
+    _ -> case parsePSSysEx x of
+      Just msg | not msg.psEdge -> go
+        (removePSMessage msg.psDifficulty msg.psPhraseID cur)
+        xs
+      _ -> case isNoteEdgeCPV x of
+        Just (c, p, Nothing) -> go
+          (filter (not . isNoteOnFor c p) cur)
+          xs
+        _ -> go (x : cur) xs -- could condense other stuff like control values, but not important for now
+  isNoteOnFor c p e = case isNoteEdgeCPV e of
+    Just (c', p', Just _) -> c == c' && p == p'
+    _                     -> False
+  removePSMessage diff phraseID events = let
+    (currentDifficulties, rest) = flip partitionMaybe events $ \e -> do
+      msg <- parsePSSysEx e
+      guard $ msg.psPhraseID == phraseID && msg.psEdge
+      return msg.psDifficulty
+    withoutDifficulty toRemove = do
+      d <- [Easy .. Expert]
+      guard $ d /= toRemove && any (`elem` currentDifficulties) [Just d, Nothing]
+      return $ unparsePSSysEx $ PSMessage (Just d) phraseID True
+    in case diff of
+      Nothing         -> rest
+      Just removeDiff -> withoutDifficulty removeDiff <> rest
 
 -- Drops time from the start, but moves meta+sysex events forward to time 0,
 -- and if a note would be split, moves the note-on forward to just shrink the note length.
 -- (probably similar for sysex edges, make sure on/off are processed right)
 syncDrop :: (NNC.C t) => t -> RTB.T t (Event.T T.Text) -> RTB.T t (Event.T T.Text)
-syncDrop = U.trackDrop -- TODO replace this
+syncDrop t trk = let
+  (dropped, rest) = U.trackSplit t trk
+  in U.trackGlueZero (condenseEvents dropped) rest
 
 combineMidi
   :: (SendMessage m)
