@@ -26,7 +26,7 @@ kakasi args str = do
   n <- kakasiArgs $ "onyx-kakasi" : "-i" : "sjis" : args
   case n of
     0 -> decodeShiftJIS <$> kakasiDo (encodeShiftJIS str)
-    _ -> error $ "DTXMania.ShiftJIS.kakasi: got non-zero error code " <> show n
+    _ -> error $ "Onyx.Util.Text.ShiftJIS.kakasi: got non-zero error code " <> show n
 
 {-
 hack to fix crash on windows.

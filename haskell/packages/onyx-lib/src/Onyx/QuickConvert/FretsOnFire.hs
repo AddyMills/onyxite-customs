@@ -56,6 +56,7 @@ import           Onyx.MIDI.Common                 (Difficulty (..),
                                                    isNoteEdge, isNoteEdgeCPV)
 import           Onyx.MIDI.Parse                  (getMIDI)
 import           Onyx.MIDI.Read                   (TrackCodec, parseTrack)
+import           Onyx.MIDI.Track.Drums.Elite      (psRealToElite)
 import qualified Onyx.MIDI.Track.File             as F
 import qualified Onyx.MIDI.Track.FiveFret         as G5
 import qualified Onyx.MIDI.Track.SixFret          as G6
@@ -352,6 +353,43 @@ isFiveFretTrack trk = case U.trackName trk of
     , "PART RHYTHM"
     , "PART GUITAR COOP"
     ]
+
+fillEliteFromPSRealMIDI :: (SendMessage m) => File.T B.ByteString -> StackTraceT m (Maybe (File.T B.ByteString))
+fillEliteFromPSRealMIDI f = do
+  song <- F.readMIDIFile $ decodeGeneral <$> f
+  let (reals, notReal) = partition (\trk -> U.trackName trk == Just "PART REAL_DRUMS_PS") song.tracks
+      (elites, rest) = partition (\trk -> U.trackName trk == Just "PART ELITE_DRUMS") notReal
+  case (reals, elites) of
+    (real : _, []) -> case F.parseTrackIgnoreWarnings real of
+      Nothing -> return Nothing -- warn maybe?
+      Just realParsed -> let
+        elite = psRealToElite realParsed
+        shownElite = F.showTrack elite
+        in return $ Just $ TE.encodeUtf8 <$> F.showMIDIFile song
+          { F.tracks = rest <> [U.setTrackName "PART ELITE_DRUMS" shownElite]
+          }
+    _ -> return Nothing
+
+fillEliteFromPSReal :: (SendMessage m, MonadIO m) => QuickFoF -> StackTraceT m QuickFoF
+fillEliteFromPSReal q = case lookup "notes.mid" q.files of
+  Nothing   -> return q
+  Just file -> do
+    mid <- getFoFMIDI file
+    fillEliteFromPSRealMIDI mid >>= \case
+      Nothing   -> return q
+      Just mid' -> do
+        lg "Converted Phase Shift Real Drums to Elite Drums"
+        return QuickFoF
+          { metadata = let
+            keep = filter (\(k, _) -> k /= "diff_drums_elite") q.metadata
+            new = case lookup "diff_drums_real" q.metadata of
+              Just d | d /= "-1" -> [("diff_drums_elite", d)]
+              _                  -> []
+            in keep <> new
+          , files = ("notes.mid", FoFMIDI mid') : filter (\(name, _) -> name /= "notes.mid") q.files
+          , location = q.location
+          , format = q.format
+          }
 
 getFoFReadables :: QuickFoF -> [(T.Text, Readable)]
 getFoFReadables q = flip map q.files $ \(name, file) -> let
@@ -705,7 +743,9 @@ syncDelay t trk = let
 
 condenseEvents :: (NNC.C t, Ord s) => RTB.T t (Event.T s) -> [Event.T s]
 condenseEvents = go [] . toList . RTB.normalize where
-  -- normalize should put note-off (both 0x8 and 0x9-velocity-0) before simultaneous note-on
+  -- normalize should put note-off (both 0x8 and 0x9-velocity-0) before simultaneous note-on;
+  -- I guess it doesn't guarantee that PS sysex will be sorted similarly
+  -- if you do a weird mix of all-difficulty and specific-difficuly messages, but whatever
   go cur []       = cur
   go cur (x : xs) = case x of
     Event.MetaEvent{} -> go (x : cur) xs
@@ -752,18 +792,14 @@ combineMidi
   -> File.T B.ByteString
   -> StackTraceT m (File.T B.ByteString)
 combineMidi offset hopoThreshold baseTracks baseMidi newTracks newMidi = do
-  -- Convert ByteString MIDI files to Text using decodeGeneral
-  let baseMidiText = fmap decodeGeneral baseMidi
-      newMidiText = fmap decodeGeneral newMidi
 
-  -- Read MIDI files into standard format
-  baseSong <- F.readMIDIFile baseMidiText
-  newSong <- F.readMIDIFile newMidiText
+  baseSong <- F.readMIDIFile $ decodeGeneral <$> baseMidi
+  newSong  <- F.readMIDIFile $ decodeGeneral <$> newMidi
 
   let baseTrackSet = HS.fromList $ "EVENTS" : "VENUE" : baseTracks
       addedTrackSet = HS.fromList newTracks `HS.difference` baseTrackSet
-      allowedNewTrack = maybe False (\name -> HS.member name addedTrackSet) . U.trackName
-      allowedBaseTrack = maybe False (\name -> HS.member name baseTrackSet) . U.trackName
+      allowedNewTrack  = maybe False (\name -> HS.member name addedTrackSet) . U.trackName
+      allowedBaseTrack = maybe False (\name -> HS.member name baseTrackSet ) . U.trackName
 
   -- Apply tempo track to get new tracks in real time format
   let newTracksRealTime
@@ -784,12 +820,10 @@ combineMidi offset hopoThreshold baseTracks baseMidi newTracks newMidi = do
       -- Convert back to beats using base song's tempo map
       offsetNewTracks = map (U.unapplyTempoTrack baseSong.tempos) offsetNewTracksRealTime
 
-  -- Combine tracks from base and new MIDI
   let combinedTracks = filter allowedBaseTrack baseSong.tracks ++ offsetNewTracks
       combinedSong = F.Song baseSong.tempos baseSong.timesigs combinedTracks
 
-  -- Convert back to ByteString MIDI format
-  return $ fmap TE.encodeUtf8 $ F.showMIDIFile combinedSong
+  return $ TE.encodeUtf8 <$> F.showMIDIFile combinedSong
 
 --------------------------------------------------------------------------------
 

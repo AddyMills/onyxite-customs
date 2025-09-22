@@ -210,16 +210,16 @@ avformat_open_input :: Ptr AVFormatContext -> CString -> Ptr () -> Ptr AVDiction
 avformat_open_input (doublePtr -> pctx) filename fmt_opt (doublePtr -> options) =
   [C.exp| int {
     avformat_open_input(
-      (AVFormatContext**)$(AVFormatContext** pctx),
+      $(AVFormatContext** pctx),
       $(char* filename),
       $(void* fmt_opt),
-      (AVDictionary**)$(AVDictionary** options)
+      $(AVDictionary** options)
     )
   } |]
 
 avformat_close_input :: Ptr AVFormatContext -> IO ()
 avformat_close_input (doublePtr -> pctx) =
-  [C.block| void { avformat_close_input((AVFormatContext**)$(AVFormatContext** pctx)); } |]
+  [C.block| void { avformat_close_input($(AVFormatContext** pctx)); } |]
 
 av_dump_format :: AVFormatContext -> CInt -> CString -> CInt -> IO ()
 av_dump_format (AVFormatContext ctx) index url is_output =
@@ -237,7 +237,7 @@ avformat_find_stream_info (AVFormatContext ctx) (doublePtr -> options) =
   [C.exp| int {
     avformat_find_stream_info(
       $(AVFormatContext* ctx),
-      (AVDictionary**)$(AVDictionary** options)
+      $(AVDictionary** options)
     )
   } |]
 
@@ -247,7 +247,7 @@ av_frame_alloc = AVFrame <$>
 
 av_frame_free :: Ptr AVFrame -> IO ()
 av_frame_free (doublePtr -> pframe) =
-  [C.block| void { av_frame_free((AVFrame**)$(AVFrame** pframe)); } |]
+  [C.block| void { av_frame_free($(AVFrame** pframe)); } |]
 
 av_frame_unref :: AVFrame -> IO ()
 av_frame_unref (AVFrame frame) =
@@ -259,7 +259,7 @@ av_packet_alloc = AVPacket <$>
 
 av_packet_free :: Ptr AVPacket -> IO ()
 av_packet_free (doublePtr -> ppacket) =
-  [C.block| void { av_packet_free((AVPacket**)$(AVPacket** ppacket)); } |]
+  [C.block| void { av_packet_free($(AVPacket** ppacket)); } |]
 
 av_packet_unref :: AVPacket -> IO ()
 av_packet_unref (AVPacket packet) =
@@ -349,7 +349,7 @@ avcodec_alloc_context3 (AVCodec codec) = AVCodecContext <$>
 
 avcodec_free_context :: Ptr AVCodecContext -> IO ()
 avcodec_free_context (doublePtr -> pctx) =
-  [C.block| void { avcodec_free_context((AVCodecContext**)$(AVCodecContext** pctx)); } |]
+  [C.block| void { avcodec_free_context($(AVCodecContext** pctx)); } |]
 
 avcodec_parameters_to_context :: AVCodecContext -> AVCodecParameters -> IO CInt
 avcodec_parameters_to_context (AVCodecContext ctx) (AVCodecParameters params) =
@@ -366,7 +366,7 @@ avcodec_open2 (AVCodecContext ctx) (AVCodec codec) (doublePtr -> options) =
     avcodec_open2(
       $(AVCodecContext* ctx),
       $(AVCodec* codec),
-      (AVDictionary**)$(AVDictionary** options)
+      $(AVDictionary** options)
     )
   } |]
 
@@ -529,7 +529,7 @@ avfilter_inout_alloc = AVFilterInOut <$>
 
 avfilter_inout_free :: Ptr AVFilterInOut -> IO ()
 avfilter_inout_free (doublePtr -> pinout) =
-  [C.block| void { avfilter_inout_free((AVFilterInOut**)$(AVFilterInOut** pinout)); } |]
+  [C.block| void { avfilter_inout_free($(AVFilterInOut** pinout)); } |]
 
 avfilter_graph_alloc :: IO AVFilterGraph
 avfilter_graph_alloc = AVFilterGraph <$>
@@ -537,13 +537,13 @@ avfilter_graph_alloc = AVFilterGraph <$>
 
 avfilter_graph_free :: Ptr AVFilterGraph -> IO ()
 avfilter_graph_free (doublePtr -> pgraph) =
-  [C.block| void { avfilter_graph_free((AVFilterGraph**)$(AVFilterGraph** pgraph)); } |]
+  [C.block| void { avfilter_graph_free($(AVFilterGraph** pgraph)); } |]
 
 avfilter_graph_create_filter :: Ptr AVFilterContext -> AVFilter -> CString -> CString -> Ptr () -> AVFilterGraph -> IO CInt
 avfilter_graph_create_filter (doublePtr -> filt_ctx) (AVFilter filt) name args opaque (AVFilterGraph graph_ctx) =
   [C.exp| int {
     avfilter_graph_create_filter(
-      (AVFilterContext**)$(AVFilterContext** filt_ctx),
+      $(AVFilterContext** filt_ctx),
       $(AVFilter* filt),
       $(char* name),
       $(char* args),
@@ -659,7 +659,7 @@ avio_alloc_context buffer buffer_size write_flag opaque read_packet write_packet
 
 avio_context_free :: Ptr AVIOContext -> IO ()
 avio_context_free (doublePtr -> pctx) =
-  [C.block| void { avio_context_free((AVIOContext**)$(AVIOContext** pctx)); } |]
+  [C.block| void { avio_context_free($(AVIOContext** pctx)); } |]
 
 av_malloc :: CSize -> IO (Ptr ())
 av_malloc size =

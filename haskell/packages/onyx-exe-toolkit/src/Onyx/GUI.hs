@@ -2498,8 +2498,16 @@ pageQuickConvertCH sink rect tab startTasks = mdo
       return $ if checked then stackIO . convertOpus else return
       )
 
+  processorRealToElite <- do
+    check <- FL.checkButtonNew processorBox $ Just "Real Drums to Elite"
+    void $ FL.setValue check False
+    FL.setTooltip check "If a song has Phase Shift Real Drums charted, adds a conversion to Elite Drums."
+    return $ do
+      checked <- FL.getValue check
+      return $ if checked then fillEliteFromPSReal else return
+
   let getTransform = do
-        procs <- sequence [processorMIDI, processorPSTapOpen, processorOgg, processorOpus]
+        procs <- sequence [processorMIDI, processorPSTapOpen, processorOgg, processorOpus, processorRealToElite]
         return $ foldr (>=>) return procs
   FL.end packProcessors
 

@@ -670,3 +670,32 @@ edKicks2 :: (NNC.C t) => EliteDrumDifficulty t -> RTB.T t ()
 edKicks2 diff =  flip RTB.mapMaybe (tdGems diff) $ \case
   EdgeOn _ (Kick D.LH, _) -> Just ()
   _                       -> Nothing
+
+psRealToElite :: D.DrumTrack U.Beats -> EliteDrumTrack U.Beats
+psRealToElite dt = mempty
+  { tdDifficulties = Map.fromList $ do
+    diff <- [minBound .. maxBound]
+    let ps = D.computePSReal (Just diff) dt
+        add2x = case diff of
+          Expert -> RTB.merge $ (Kick D.LH, GemNormal, VelocityNormal) <$ dt.drumKick2x
+          _      -> id
+        elite = makeEliteDifficulty $ add2x $ flip fmap ps $ \(rd, vel) -> case rd of
+          Right D.Kick                    -> (Kick D.RH, GemNormal, vel)
+          Right D.Red                     -> (Snare, GemNormal, vel)
+          Left  D.Rimshot                 -> (Snare, GemNormal, vel)
+          Left  D.HHOpen                  -> (Hihat, GemHihatOpen, vel)
+          Left  D.HHSizzle                -> (Hihat, GemHihatClosed, vel)
+          Left  D.HHPedal                 -> (HihatFoot, GemNormal, vel)
+          Right (D.Pro D.Yellow D.Cymbal) -> (CrashL, GemNormal, vel)
+          Right (D.Pro D.Yellow D.Tom   ) -> (Tom1, GemNormal, vel)
+          Right (D.Pro D.Blue   D.Tom   ) -> (Tom2, GemNormal, vel)
+          Right (D.Pro D.Green  D.Tom   ) -> (Tom3, GemNormal, vel)
+          Right (D.Pro D.Blue   D.Cymbal) -> (Ride, GemNormal, vel)
+          Right (D.Pro D.Green  D.Cymbal) -> (CrashR, GemNormal, vel)
+          Right D.Orange                  -> (CrashR, GemNormal, vel) -- shouldn't happen!
+    return (diff, elite)
+  , tdLanes        = RTB.empty -- TODO
+  , tdOverdrive    = dt.drumOverdrive
+  , tdActivation   = dt.drumActivation
+  , tdSolo         = dt.drumSolo
+  }

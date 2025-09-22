@@ -2730,20 +2730,22 @@ splitHighwaySpace n heightWidthRatio (WindowDims w h) = let
   in makeRows n $ reverse $ pieces bestRows h
 
 splitSpace
-  :: [(T.Text, PreviewTrack)]
-  -> Float
+  :: GLStuff
+  -> [(T.Text, PreviewTrack)]
   -> WindowDims
   -> ([((Int, Int, Int, Int), (T.Text, PreviewTrack))], [((Int, Int, Int, Int), (T.Text, PreviewTrack))])
-splitSpace []   _                _                     = ([], [])
-splitSpace trks heightWidthRatio (WindowDims w h) = let
+splitSpace _  []    _                = ([], [])
+splitSpace gl trks  (WindowDims w h) = let
   (vocals, highways) = flip partition trks $ \case
     (_, PreviewVocal _) -> True
     _                   -> False
+  defaultVocalHeight = round $ 80 * gl.scaleUI
   vocalHeight = case length vocals of
-    0   -> 100
-    len -> min 100 $ quot (fromIntegral h - 100) len
+    0   -> defaultVocalHeight
+    len -> min defaultVocalHeight $ quot (fromIntegral h - defaultVocalHeight) len
   vocalSpaces = [ (0, h - vocalHeight * i, w, vocalHeight) | i <- [1..] ]
-  highwaySpaces = splitHighwaySpace (length highways) heightWidthRatio
+  highwaySpaces = splitHighwaySpace (length highways)
+    gl.gfxConfig.view.height_width_ratio
     (WindowDims w $ h - vocalHeight * length vocals)
   in (zip vocalSpaces vocals, zip highwaySpaces highways)
 
@@ -3039,9 +3041,7 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAud
       , T.pack bpmString
       ] <> toList (fmap snd $ Map.lookupLE time $ previewSections psong)
 
-  let (vocalSpaces, highwaySpaces) = splitSpace trks
-        gl.gfxConfig.view.height_width_ratio
-        dims
+  let (vocalSpaces, highwaySpaces) = splitSpace gl trks dims
 
   forM_ vocalSpaces $ \(space, (_name, trk)) -> checkGL "draw vocals" $ case trk of
     PreviewVocal m -> drawLyrics gl dims space time m
