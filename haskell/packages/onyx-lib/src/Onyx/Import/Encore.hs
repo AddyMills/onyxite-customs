@@ -178,7 +178,8 @@ encoreToOnyxMIDI = fmap $ \encore -> mempty
       , F.onyxPartMania = Map.fromList $ encorePart encore.partDrums.part
       })
     , (F.PartVocal, mempty
-      { F.onyxPartMania = Map.fromList $ encorePart encore.partVocals
+      { F.onyxPartVocals = encore.pitchedVocals
+      , F.onyxPartMania = Map.fromList $ encorePart encore.partVocals
       })
     ]
   , F.onyxEvents   = if RTB.null encore.events.eventsSections
@@ -273,6 +274,15 @@ encorePartData diffs mid = let
       { mania = do
         tier <- getTier ["vl", "vocals"]
         importPadMania tier mid.tracks.partVocals
+      , vocal = do
+        tier <- getTier ["pv", "pitched_vocals", "pro_vocals"]
+        Just ModeVocal
+          { difficulty = tier
+          , count      = Vocal1
+          , gender     = Nothing
+          , key        = Nothing
+          , lipsyncRB3 = Nothing
+          }
       , ..
       })
     ]

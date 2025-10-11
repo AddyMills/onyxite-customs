@@ -36,6 +36,7 @@ import           Onyx.MIDI.Track.Drums      (DrumTrack)
 import           Onyx.MIDI.Track.Events     (EventsTrack)
 import           Onyx.MIDI.Track.File       (ParseFile (..), fileTrack)
 import           Onyx.MIDI.Track.FiveFret   (FiveTrack)
+import           Onyx.MIDI.Track.Vocal      (VocalTrack)
 import           Onyx.StackTrace            (SendMessage, StackTraceT, fatal,
                                              mapStackTraceT, stackIO)
 import           Onyx.Util.Text.Decode      (decodeGeneral)
@@ -48,7 +49,7 @@ import           System.FilePath            (takeDirectory, (</>))
 data EncoreInfo f = EncoreInfo
   { title              :: T.Text
   , artist             :: T.Text
-  , diff               :: HM.HashMap T.Text Int -- keys: ds/drums ba/bass gr/guitar vl/vocals plastic_drums plastic_bass plastic_guitar; -1 for no part
+  , diff               :: HM.HashMap T.Text Int -- keys: ds/drums ba/bass gr/guitar vl/vocals plastic_drums plastic_bass plastic_guitar pitched_vocals; -1 for no part
   , stems              :: HM.HashMap T.Text [f] -- keys: drums bass lead vocals backing (backing required); values can be string or array of strings
   , midi               :: f
   , icon_drums         :: T.Text -- aka sid, usual value Drum
@@ -130,6 +131,7 @@ encoreMidiToFoF (F.Cons typ dvn trks) = let
     Just "PLASTIC DRUMS"  -> U.setTrackName "PART DRUMS"  trk
     -- PLASTIC VOCALS is intended for 5-fret vocals track, leave name as-is
     Just "PITCHED VOCALS" -> U.setTrackName "PART VOCALS" trk -- this is RB style vocals
+    Just "PRO VOCALS"     -> U.setTrackName "PART VOCALS" trk -- RB style vocals (newer Fortnite name)
     Just "PLASTIC KEYS"   -> U.setTrackName "PART KEYS"   trk
     _                     -> trk
   in F.Cons typ dvn $ map renameTrack trks
@@ -152,6 +154,7 @@ data EncoreFile t = EncoreFile
   , plasticKeys   :: FiveTrack    t
   , plasticBass   :: FiveTrack    t
   , plasticDrums  :: DrumTrack    t
+  , pitchedVocals :: VocalTrack   t
   , events        :: EventsTrack  t
   , beat          :: BeatTrack    t
   , section       :: SectionTrack t
@@ -169,6 +172,7 @@ instance ParseFile EncoreFile where
     plasticKeys   <- (.plasticKeys  ) =. fileTrack ("PLASTIC KEYS"   :| [])
     plasticBass   <- (.plasticBass  ) =. fileTrack ("PLASTIC BASS"   :| [])
     plasticDrums  <- (.plasticDrums ) =. fileTrack ("PLASTIC DRUMS"  :| [])
+    pitchedVocals <- (.pitchedVocals) =. fileTrack ("PITCHED VOCALS" :| ["PRO VOCALS"])
     events        <- (.events       ) =. fileTrack ("EVENTS"         :| [])
     beat          <- (.beat         ) =. fileTrack ("BEAT"           :| [])
     section       <- (.section      ) =. fileTrack ("SECTION"        :| [])

@@ -1,16 +1,28 @@
 # Version history
 
-# 20250101
+# 20251011
 
-* Import from Encore format
-  * Pad tracks including lifts are displayed in preview
-  * CH Quick Convert can directly convert to CH-compatible format
-    (`song.ini` or `.sng`)
+* Improvements to 3D preview
+  * Track names below highways
+  * Lyrics display at top
+  * Lefty flip option
+  * Encore pad tracks with lifts
+  * Background visualization options:
+    audio waveform, RB3 post-processing effects
+* Import from Encore format (`info.json`)
+* CH Quick Convert additions
+  * Conversion of Encore format to CH-compatible format
+  * Conversion of Phase Shift Real Drums to Elite Drums
 * Import from Guitar Hero 6 (early WoR) prototype disc
-* Improve GH3 cache creator to preserve custom scripting
-  from AddyMills's toolkit
-* Fix an audio error when converting some formats such as GHWT/GHWoR
-  to Clone Hero with Opus audio
+* Upgrades to GH3 cache creator
+  * Preserve custom scripting from songs compiled by Honeycomb
+  * Support Guitar Hero: Aerosmith custom songs
+* Fix an audio error when converting certain song formats to Clone Hero
+  with Opus audio
+* Fix negative numbers with a decimal point
+  not being read correctly from `.chart`
+* Fix drum lanes being split up by different velocity notes
+  when importing from CH format
 
 # 20240928
 
