@@ -276,7 +276,7 @@ drawEliteDrumPlay gl nowTime speed layout tdps = do
         EDRightFarCrash  -> Just False
         EDRightNearCrash -> Just True
         _                -> Nothing
-      highwayParts = concat
+      highwayParts = (if gl.leftyFlip then reverse else id) $ concat
         [ if layoutLeftOpenHand then [ED.CrashL, ED.Hihat, ED.Snare] else [ED.Snare, ED.Hihat, ED.CrashL]
         , [ED.Tom1, ED.Tom2, ED.Tom3]
         , if layoutRightNearCrash then [ED.CrashR, ED.Ride] else [ED.Ride, ED.CrashR]
@@ -381,14 +381,18 @@ drawEliteDrumPlay gl nowTime speed layout tdps = do
               then drawGem nowTime od gem $ Just $ 1 - realToFrac (nowTime - hitTime) / fadeTime
               else return ()
       targets =
-        [ ([ED.Snare ], TextureTargetRed         , TextureTargetRedLight         , Just $ V4 0 0 0 0.2)
-        , ([ED.Hihat ], TextureTargetYellow      , TextureTargetYellowLight      , Just $ V4 1 1 1 0.2)
-        , ([ED.CrashL], TextureTargetPurple      , TextureTargetPurpleLight      , Just $ V4 0 0 0 0.2)
-        , ([ED.Tom1  ], TextureTargetOrangeLeft  , TextureTargetOrangeLeftLight  , Just $ V4 1 1 1 0.2)
-        , ([ED.Tom2  ], TextureTargetOrangeCenter, TextureTargetOrangeCenterLight, Just $ V4 1 1 1 0.15)
-        , ([ED.Tom3  ], TextureTargetOrangeRight , TextureTargetOrangeRightLight , Just $ V4 1 1 1 0.1)
-        , ([ED.Ride  ], TextureTargetBlue        , TextureTargetBlueLight        , Just $ if layoutRightNearCrash then V4 1 1 1 0.2 else V4 0 0 0 0.2)
-        , ([ED.CrashR], TextureTargetGreen       , TextureTargetGreenLight       , Just $ if layoutRightNearCrash then V4 0 0 0 0.2 else V4 1 1 1 0.2)
+        [ (     [ED.Snare ], TextureTargetRed         , TextureTargetRedLight         , Just $ V4 0 0 0 0.2)
+        , (     [ED.Hihat ], TextureTargetYellow      , TextureTargetYellowLight      , Just $ V4 1 1 1 0.2)
+        , (     [ED.CrashL], TextureTargetPurple      , TextureTargetPurpleLight      , Just $ V4 0 0 0 0.2)
+        , if gl.leftyFlip
+          then ([ED.Tom1  ], TextureTargetOrangeRight , TextureTargetOrangeRightLight , Just $ V4 1 1 1 0.2)
+          else ([ED.Tom1  ], TextureTargetOrangeLeft  , TextureTargetOrangeLeftLight  , Just $ V4 1 1 1 0.2)
+        , (     [ED.Tom2  ], TextureTargetOrangeCenter, TextureTargetOrangeCenterLight, Just $ V4 1 1 1 0.15)
+        , if gl.leftyFlip
+          then ([ED.Tom3  ], TextureTargetOrangeLeft  , TextureTargetOrangeLeftLight  , Just $ V4 1 1 1 0.1)
+          else ([ED.Tom3  ], TextureTargetOrangeRight , TextureTargetOrangeRightLight , Just $ V4 1 1 1 0.1)
+        , (     [ED.Ride  ], TextureTargetBlue        , TextureTargetBlueLight        , Just $ if layoutRightNearCrash then V4 1 1 1 0.2 else V4 0 0 0 0.2)
+        , (     [ED.CrashR], TextureTargetGreen       , TextureTargetGreenLight       , Just $ if layoutRightNearCrash then V4 0 0 0 0.2 else V4 1 1 1 0.2)
         ]
   -- draw highway
   forM_ (makeToggleBounds nearTime farTime $ fmap (.solo) zoomed) $ \(t1, t2, isSolo) -> do
@@ -606,16 +610,32 @@ drawDrumPlay gl nowTime speed mode dps = do
         Drums5 -> 5
         _      -> 4
       drawGem t od (gem, velocity) alpha = let
-        (texid, obj) = case gem of
-          D.Kick                  -> (if od then TextureLongEnergy   else TextureLongKick     , Model ModelDrumKick  )
-          D.Red                   -> (if od then TextureEnergyGem    else TextureRedGem       , Model ModelDrumTom   )
-          D.Pro D.Yellow D.Tom    -> (if od then TextureEnergyGem    else TextureYellowGem    , Model ModelDrumTom   )
-          D.Pro D.Blue   D.Tom    -> (if od then TextureEnergyGem    else TextureBlueGem      , Model ModelDrumTom   )
-          D.Pro D.Green  D.Tom    -> (if od then TextureEnergyGem    else TextureGreenGem     , Model ModelDrumTom   )
-          D.Pro D.Yellow D.Cymbal -> (if od then TextureEnergyCymbal else TextureYellowCymbal , Model ModelDrumCymbal)
-          D.Pro D.Blue   D.Cymbal -> (if od then TextureEnergyCymbal else TextureBlueCymbal   , Model ModelDrumCymbal)
-          D.Pro D.Green  D.Cymbal -> (if od then TextureEnergyCymbal else TextureGreenCymbal  , Model ModelDrumCymbal)
-          D.Orange                -> (if od then TextureEnergyCymbal else TextureOrangeCymbal , Model ModelDrumCymbal)
+        obj = case gem of
+          D.Kick           -> Model ModelDrumKick
+          D.Red            -> Model ModelDrumTom
+          D.Pro _ D.Tom    -> Model ModelDrumTom
+          D.Pro _ D.Cymbal -> Model ModelDrumCymbal
+          D.Orange         -> Model ModelDrumCymbal
+        texid = if od
+          then case gem of
+            D.Kick           -> TextureLongEnergy
+            D.Red            -> TextureEnergyGem
+            D.Pro _ D.Tom    -> TextureEnergyGem
+            D.Pro _ D.Cymbal -> TextureEnergyCymbal
+            D.Orange         -> TextureEnergyCymbal
+          else case gem of
+            D.Kick                  -> TextureLongKick
+            D.Red                   -> if gl.leftyFlip then TextureGreenGem                    else TextureRedGem
+            D.Pro D.Yellow D.Tom    -> if gl.leftyFlip then TextureBlueGem                     else TextureYellowGem
+            D.Pro D.Blue   D.Tom    -> if gl.leftyFlip && mode /= Drums5 then TextureYellowGem else TextureBlueGem
+            D.Pro D.Green  D.Tom    -> if gl.leftyFlip then TextureRedGem                      else TextureGreenGem
+            D.Pro D.Yellow D.Cymbal -> case (gl.leftyFlip, mode) of
+              (True , Drums5) -> TextureOrangeCymbal
+              (True , _     ) -> TextureBlueCymbal
+              (False, _     ) -> TextureYellowCymbal
+            D.Pro D.Blue   D.Cymbal -> if gl.leftyFlip then TextureYellowCymbal                else TextureBlueCymbal
+            D.Pro D.Green  D.Cymbal -> if gl.leftyFlip then TextureRedCymbal                   else TextureGreenCymbal
+            D.Orange                -> if gl.leftyFlip then TextureYellowCymbal                else TextureOrangeCymbal
         shade = case alpha of
           Nothing -> case velocity of
             D.VelocityNormal -> CSImage texid
@@ -625,17 +645,17 @@ drawDrumPlay gl nowTime speed mode dps = do
         (x1, x2) = case mode of
           Drums5 -> case gem of
             D.Kick           -> (-1, 1)
-            D.Red            -> (-1, -0.6)
-            D.Pro D.Yellow _ -> (-0.6, -0.2)
-            D.Pro D.Blue _   -> (-0.2, 0.2)
-            D.Orange         -> (0.2, 0.6)
-            D.Pro D.Green _  -> (0.6, 1)
+            D.Red            -> if gl.leftyFlip then (0.6, 1) else (-1, -0.6)
+            D.Pro D.Yellow _ -> if gl.leftyFlip then (0.2, 0.6) else (-0.6, -0.2)
+            D.Pro D.Blue _   -> if gl.leftyFlip then (-0.2, 0.2) else (-0.2, 0.2)
+            D.Orange         -> if gl.leftyFlip then (-0.6, -0.2) else (0.2, 0.6)
+            D.Pro D.Green _  -> if gl.leftyFlip then (-1, -0.6) else (0.6, 1)
           _ -> case gem of
             D.Kick           -> (-1, 1)
-            D.Red            -> (-1, -0.5)
-            D.Pro D.Yellow _ -> (-0.5, 0)
-            D.Pro D.Blue _   -> (0, 0.5)
-            D.Pro D.Green _  -> (0.5, 1)
+            D.Red            -> if gl.leftyFlip then (0.5, 1) else (-1, -0.5)
+            D.Pro D.Yellow _ -> if gl.leftyFlip then (0, 0.5) else (-0.5, 0)
+            D.Pro D.Blue _   -> if gl.leftyFlip then (-0.5, 0) else (0, 0.5)
+            D.Pro D.Green _  -> if gl.leftyFlip then (-1, -0.5) else (0.5, 1)
             D.Orange         -> (0.25, 0.75) -- shouldn't be used
         xCenter = x1 + (x2 - x1) / 2
         (x1', x2') = case velocity of
@@ -750,15 +770,17 @@ drawDrumPlay gl nowTime speed mode dps = do
   let drawLane startTime endTime pad = let
         i = case mode of
           Drums5 -> case pad of
-            D.Pro D.Yellow _ -> 1
-            D.Pro D.Blue   _ -> 2
-            D.Orange         -> 3
-            D.Pro D.Green  _ -> 4
+            D.Red            -> if gl.leftyFlip then 4 else 0
+            D.Pro D.Yellow _ -> if gl.leftyFlip then 3 else 1
+            D.Pro D.Blue   _ -> if gl.leftyFlip then 2 else 2
+            D.Orange         -> if gl.leftyFlip then 1 else 3
+            D.Pro D.Green  _ -> if gl.leftyFlip then 0 else 4
             _                -> 0
           _ -> case pad of
-            D.Pro D.Yellow _ -> 1
-            D.Pro D.Blue   _ -> 2
-            D.Pro D.Green  _ -> 3
+            D.Red            -> if gl.leftyFlip then 3 else 0
+            D.Pro D.Yellow _ -> if gl.leftyFlip then 2 else 1
+            D.Pro D.Blue   _ -> if gl.leftyFlip then 1 else 2
+            D.Pro D.Green  _ -> if gl.leftyFlip then 0 else 3
             _                -> 0
         x1 = fracToX $ i       / laneCount
         x2 = fracToX $ (i + 1) / laneCount
@@ -766,10 +788,14 @@ drawDrumPlay gl nowTime speed mode dps = do
         z1 = timeToZ startTime
         z2 = timeToZ endTime
         tex = case pad of
-          D.Red            -> TextureLaneRed
-          D.Pro D.Yellow _ -> TextureLaneYellow
-          D.Pro D.Blue   _ -> TextureLaneBlue
-          D.Pro D.Green  _ -> TextureLaneGreen
+          D.Red            -> if gl.leftyFlip then TextureLaneGreen else TextureLaneRed
+          D.Pro D.Yellow _ -> case (gl.leftyFlip, mode) of
+            (True , Drums5) -> TextureLaneOrange
+            (True , _     ) -> TextureLaneBlue
+            (False, _     ) -> TextureLaneYellow
+          D.Pro D.Blue   _ -> if gl.leftyFlip && mode /= Drums5 then TextureLaneYellow else TextureLaneBlue
+          D.Orange         -> if gl.leftyFlip then TextureLaneYellow else TextureLaneOrange
+          D.Pro D.Green  _ -> if gl.leftyFlip then TextureLaneRed else TextureLaneGreen
           _                -> TextureLaneOrange
         in draw Flat (ObjectStretch (V3 x1 y z1) (V3 x2 y z2)) (CSImage tex) 1 globalLight
       drawLanes _        []                      = return ()
@@ -801,20 +827,35 @@ drawDrumPlay gl nowTime speed mode dps = do
         in when (t > nearTime) $ do
           forM_ colorsYes $ \(i, light, _) -> drawTargetSquare i light alpha
           drawLights states colorsNo
-  drawLights [ (t, pad) | (t, (res, _)) <- dps.events, Just ((pad, _vel), _) <- [res.hit] ] $ case mode of
-    Drums5 ->
-      [ (0, TextureTargetRedLight   , [D.Red                                        ])
-      , (1, TextureTargetYellowLight, [D.Pro D.Yellow D.Tom, D.Pro D.Yellow D.Cymbal])
-      , (2, TextureTargetBlueLight  , [D.Pro D.Blue   D.Tom, D.Pro D.Blue   D.Cymbal])
-      , (3, TextureTargetOrangeLight, [D.Orange                                     ])
-      , (4, TextureTargetGreenLight , [D.Pro D.Green  D.Tom, D.Pro D.Green  D.Cymbal])
-      ]
-    _ ->
-      [ (0, TextureTargetRedLight   , [D.Red                                        ])
-      , (1, TextureTargetYellowLight, [D.Pro D.Yellow D.Tom, D.Pro D.Yellow D.Cymbal])
-      , (2, TextureTargetBlueLight  , [D.Pro D.Blue   D.Tom, D.Pro D.Blue   D.Cymbal])
-      , (3, TextureTargetGreenLight , [D.Pro D.Green  D.Tom, D.Pro D.Green  D.Cymbal])
-      ]
+  drawLights [ (t, pad) | (t, (res, _)) <- dps.events, Just ((pad, _vel), _) <- [res.hit] ] $ if gl.leftyFlip
+    then case mode of
+      Drums5 ->
+        [ (0, TextureTargetRedLight   , [D.Pro D.Green  D.Tom, D.Pro D.Green  D.Cymbal])
+        , (1, TextureTargetYellowLight, [D.Orange                                     ])
+        , (2, TextureTargetBlueLight  , [D.Pro D.Blue   D.Tom, D.Pro D.Blue   D.Cymbal])
+        , (3, TextureTargetOrangeLight, [D.Pro D.Yellow D.Tom, D.Pro D.Yellow D.Cymbal])
+        , (4, TextureTargetGreenLight , [D.Red                                        ])
+        ]
+      _ ->
+        [ (0, TextureTargetRedLight   , [D.Pro D.Green  D.Tom, D.Pro D.Green  D.Cymbal])
+        , (1, TextureTargetYellowLight, [D.Pro D.Blue   D.Tom, D.Pro D.Blue   D.Cymbal])
+        , (2, TextureTargetBlueLight  , [D.Pro D.Yellow D.Tom, D.Pro D.Yellow D.Cymbal])
+        , (3, TextureTargetGreenLight , [D.Red                                        ])
+        ]
+    else case mode of
+      Drums5 ->
+        [ (0, TextureTargetRedLight   , [D.Red                                        ])
+        , (1, TextureTargetYellowLight, [D.Pro D.Yellow D.Tom, D.Pro D.Yellow D.Cymbal])
+        , (2, TextureTargetBlueLight  , [D.Pro D.Blue   D.Tom, D.Pro D.Blue   D.Cymbal])
+        , (3, TextureTargetOrangeLight, [D.Orange                                     ])
+        , (4, TextureTargetGreenLight , [D.Pro D.Green  D.Tom, D.Pro D.Green  D.Cymbal])
+        ]
+      _ ->
+        [ (0, TextureTargetRedLight   , [D.Red                                        ])
+        , (1, TextureTargetYellowLight, [D.Pro D.Yellow D.Tom, D.Pro D.Yellow D.Cymbal])
+        , (2, TextureTargetBlueLight  , [D.Pro D.Blue   D.Tom, D.Pro D.Blue   D.Cymbal])
+        , (3, TextureTargetGreenLight , [D.Pro D.Green  D.Tom, D.Pro D.Green  D.Cymbal])
+        ]
   glDepthFunc GL_LESS
   -- draw notes
   traverseDescWithKey_ drawNotes zoomed
@@ -879,11 +920,11 @@ drawFivePlay gl nowTime speed gps = do
       fracToX f = gl.gfxConfig.track.note_area.x_left + trackWidth * f
       colorCenterX = \case
         Nothing          -> fracToX 0.5
-        Just Five.Green  -> fracToX $ 1 / 10
-        Just Five.Red    -> fracToX $ 3 / 10
-        Just Five.Yellow -> fracToX $ 5 / 10
-        Just Five.Blue   -> fracToX $ 7 / 10
-        Just Five.Orange -> fracToX $ 9 / 10
+        Just Five.Green  -> fracToX $ if gl.leftyFlip then 9 / 10 else 1 / 10
+        Just Five.Red    -> fracToX $ if gl.leftyFlip then 7 / 10 else 3 / 10
+        Just Five.Yellow -> fracToX $                                  5 / 10
+        Just Five.Blue   -> fracToX $ if gl.leftyFlip then 3 / 10 else 7 / 10
+        Just Five.Orange -> fracToX $ if gl.leftyFlip then 1 / 10 else 9 / 10
       drawSustain t1 t2 od color
         | t2 <= nowTime = return ()
         | otherwise     = let
@@ -1040,7 +1081,13 @@ drawFivePlay gl nowTime speed gps = do
   void $ Map.traverseWithKey drawBeat zoomed
   -- draw lanes
   let drawLane startTime endTime color = let
-        i = maybe 2 (fromIntegral . fromEnum) (color :: Maybe Five.Color)
+        i = case color :: Maybe Five.Color of
+          Nothing          -> 2
+          Just Five.Green  -> if gl.leftyFlip then 4 else 0
+          Just Five.Red    -> if gl.leftyFlip then 3 else 1
+          Just Five.Yellow ->                             2
+          Just Five.Blue   -> if gl.leftyFlip then 1 else 3
+          Just Five.Orange -> if gl.leftyFlip then 0 else 4
         x1 = fracToX $ i       / 5
         x2 = fracToX $ (i + 1) / 5
         y = gl.gfxConfig.track.y
@@ -1079,11 +1126,11 @@ drawFivePlay gl nowTime speed gps = do
   drawLanes farTime $ Map.toDescList zoomed
   -- draw target
   let targets =
-        [ (0, Five.Green , TextureTargetGreen , TextureTargetGreenLight )
-        , (1, Five.Red   , TextureTargetRed   , TextureTargetRedLight   )
-        , (2, Five.Yellow, TextureTargetYellow, TextureTargetYellowLight)
-        , (3, Five.Blue  , TextureTargetBlue  , TextureTargetBlueLight  )
-        , (4, Five.Orange, TextureTargetOrange, TextureTargetOrangeLight)
+        [ (if gl.leftyFlip then 4 else 0, Five.Green , TextureTargetGreen , TextureTargetGreenLight )
+        , (if gl.leftyFlip then 3 else 1, Five.Red   , TextureTargetRed   , TextureTargetRedLight   )
+        , (if gl.leftyFlip then 2 else 2, Five.Yellow, TextureTargetYellow, TextureTargetYellowLight)
+        , (if gl.leftyFlip then 1 else 3, Five.Blue  , TextureTargetBlue  , TextureTargetBlueLight  )
+        , (if gl.leftyFlip then 0 else 4, Five.Orange, TextureTargetOrange, TextureTargetOrangeLight)
         ]
   forM_ targets $ \(i, fret, dark, light) -> if testBit currentState.heldFrets $ fromEnum fret
     then drawTargetSquare i light 1
@@ -1943,6 +1990,7 @@ data GLStuff = GLStuff
   , previewSong   :: Maybe PreviewSong
   , scaleUI       :: Float -- TODO allow changing this during runtime
   , waveform      :: Bool
+  , leftyFlip     :: Bool
   }
 
 data FontFace = FontFace
@@ -2388,7 +2436,8 @@ loadGLStuff scaleUI previewSong = do
     fontGlyphs <- stackIO $ newIORef HM.empty
     return FontFace{..}
 
-  let waveform = prefs.prefWaveform
+  let waveform  = prefs.prefWaveform
+      leftyFlip = prefs.prefLeftyFlip
 
   return GLStuff{..}
 

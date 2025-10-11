@@ -56,6 +56,7 @@ data Preferences = Preferences
   , prefRB3Encoding   :: RBEncoding -- default encoding for rb3 compile targets
   , prefPackEncoding  :: Maybe RBEncoding -- should quick convert packs enforce a single encoding
   , prefWaveform      :: Bool -- display audio waveform in None or Venue preview backgrounds
+  , prefLeftyFlip     :: Bool
   }
 
 instance StackJSON Preferences where
@@ -92,6 +93,7 @@ instance StackJSON Preferences where
     prefRB3Encoding   <- (.prefRB3Encoding  ) =. fill Latin1           "rb3-encoding"    stackJSON
     prefPackEncoding  <- (.prefPackEncoding ) =. fill (Just Latin1)    "pack-encoding"   stackJSON
     prefWaveform      <- (.prefWaveform     ) =. opt  True             "waveform"        stackJSON
+    prefLeftyFlip     <- (.prefLeftyFlip    ) =. opt  False            "lefty-flip"      stackJSON
     return Preferences{..}
 
 instance Default Preferences where

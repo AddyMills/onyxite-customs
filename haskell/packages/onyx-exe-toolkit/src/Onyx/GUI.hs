@@ -4187,7 +4187,10 @@ launchPreferences sink makeMenuBar = do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Audio waveform"
             void $ FL.setValue check loadedPrefs.prefWaveform
             return $ (\b prefs -> prefs { prefWaveform = b }) <$> FL.getValue check
-          -- TODO lefty flip
+          , do
+            check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Lefty flip"
+            void $ FL.setValue check loadedPrefs.prefLeftyFlip
+            return $ (\b prefs -> prefs { prefLeftyFlip = b }) <$> FL.getValue check
           ]
         FL.end pack
         return fn
