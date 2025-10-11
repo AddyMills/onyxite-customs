@@ -536,7 +536,7 @@ getAudioDirs :: (SendMessage m, MonadIO m) => Project -> StackTraceT m [FilePath
 getAudioDirs proj = do
   jmt <- stackIO J.findJammitDir
   let addons = maybe id (:) jmt [takeDirectory $ projectLocation proj]
-  dirs <- prefAudioDirs <$> readPreferences
+  dirs <- (.prefAudioDirs) <$> readPreferences
   mapM (stackIO . Dir.canonicalizePath) $ addons ++ dirs
 
 shakeBuild1 :: (MonadIO m) =>
@@ -703,7 +703,7 @@ installGH1 gh1 proj gen = do
     , author           = toBytes . adjustSongText <$> (projectSongYaml proj).metadata.author
     , album_art        = Nothing -- not used
     , files            = filePairs
-    , sort_            = guard (prefSortGH2 prefs) >> if prefArtistSort prefs
+    , sort_            = guard prefs.prefSortGH2 >> if prefs.prefArtistSort
       then Just SongSortArtistTitle
       else Just SongSortTitleArtist
     , loading_phrase   = toBytes <$> meta.loadingPhrase
@@ -754,7 +754,7 @@ installGH2 gh2 proj gen = do
     , author           = toBytes . adjustSongText <$> meta.author
     , album_art        = Just $ dir </> "cover.png_ps2"
     , files            = filePairs <> filePairsDX
-    , sort_            = guard (prefSortGH2 prefs) >> if prefArtistSort prefs
+    , sort_            = guard prefs.prefSortGH2 >> if prefs.prefArtistSort
       then Just SongSortArtistTitle
       else Just SongSortTitleArtist
     , loading_phrase   = toBytes <$> meta.loadingPhrase

@@ -165,7 +165,7 @@ buildGH3TextSet prefs dlName lang paks = let
   otherNodes = nubOrdOn ((.nodeFilenameKey) . fst) $ paks >>= (.gh3OtherNodes)
   unk1 = qbKeyCRC $ "1o99lm\\" <> dlName <> ".qb"
   unk2 = qbKeyCRC $ "7buqvk" <> dlName
-  sortAlgo = if prefArtistSort prefs
+  sortAlgo = if prefs.prefArtistSort
     then SongSortArtistTitle
     else SongSortTitleArtist
   allSongData

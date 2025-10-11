@@ -1942,6 +1942,7 @@ data GLStuff = GLStuff
   , fontFaces     :: Map.Map (T.Text, Int) FontFace
   , previewSong   :: Maybe PreviewSong
   , scaleUI       :: Float -- TODO allow changing this during runtime
+  , waveform      :: Bool
   }
 
 data FontFace = FontFace
@@ -2348,10 +2349,10 @@ loadGLStuff scaleUI previewSong = do
         return fbufs
 
   prefs <- readPreferences
-  framebuffers <- case prefMSAA prefs of
+  framebuffers <- case prefs.prefMSAA of
     Just n | n > 1 -> setupMSAA n
     _              -> setupSimple
-  let fxaaEnabled = prefFXAA prefs
+  let fxaaEnabled = prefs.prefFXAA
 
   videoBGs <- fmap (Map.fromList . catMaybes) $ forM (maybe [] (map snd . previewBG) previewSong) $ \case
     PreviewBGVideo vi -> do
@@ -2386,6 +2387,8 @@ loadGLStuff scaleUI previewSong = do
     fontSlot <- stackIO $ frGlyph <$> peek fontFace
     fontGlyphs <- stackIO $ newIORef HM.empty
     return FontFace{..}
+
+  let waveform = prefs.prefWaveform
 
   return GLStuff{..}
 
@@ -2907,8 +2910,8 @@ drawTimeBox gl dims@(WindowDims _ hWhole) timeLines = do
   forM_ (zip [1..] texLines) $ \(i, texLine) -> do
     drawTextLine gl dims (map (, Nothing) texLine) $ V2 margin $ hWhole - (margin + fontSize) * i
 
-drawVenue :: GLStuff -> WindowDims -> Double -> VenueState Double -> IO ()
-drawVenue gl dims@(WindowDims wWhole hWhole) _time venueState = do
+drawVenueDebug :: GLStuff -> WindowDims -> Double -> VenueState Double -> IO ()
+drawVenueDebug gl dims@(WindowDims _wWhole hWhole) _time venueState = do
   texLines <- mapM (prepareText gl (.timeBox))
     [ T.pack $ show venueState.lighting
     , T.pack $ show venueState.postProcessing
@@ -2974,7 +2977,7 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAud
 
   glDepthFunc GL_ALWAYS -- turn off z to draw backgrounds + time box
 
-  let waveform = forM_ mAudioHandle $ \audioHandle -> checkGL "draw waveform" $ do
+  let waveform = when gl.waveform $ forM_ mAudioHandle $ \audioHandle -> checkGL "draw waveform" $ do
         waveformData <- audioWaveform audioHandle
         unless (VS.null waveformData) $ do
           drawWaveform gl dims waveformData
@@ -3016,7 +3019,7 @@ drawTracks gl dims@(WindowDims wWhole hWhole) time speed bg userLayout trks mAud
           case gl.gfxConfig.view.background of
             V4 r g b a -> glClearColor r g b a
           glClear GL_COLOR_BUFFER_BIT
-          drawVenue gl dims time venueState
+          -- drawVenueDebug gl dims time venueState
           waveform
     Nothing -> waveform
 

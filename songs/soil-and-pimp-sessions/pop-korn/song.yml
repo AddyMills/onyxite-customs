@@ -5,13 +5,47 @@ metadata:
   author: Onyxite
 audio:
   album-track:
-    md5: 282fc878d0eecf586eaf4d8e2ac773cf
+    # older md5: 282fc878d0eecf586eaf4d8e2ac773cf
+    md5: 0a1aa82ba24ec684a32d02d1d0941fad
     frames: 10808028
+  stems:
+    file-path: audio-stems.wav
+    commands:
+    - ../../../scripts/stems AUDIO(album-track) audio-stems.wav
+    channels: 8
+  hihat:
+    file-path: ../../../sound/hihat-foot.wav
+  countin:
+    samples: {}
 plans:
   album:
     song:
-      pad: [1.828, album-track]
+      mix:
+      - flip: {pad: [1.828, album-track]}
+      - countin
+  dev:
+    song:
+      flip:
+        pad: [1.828, album-track]
+    parts:
+      bass:
+        flip:
+          pad: [1.828, channels: [[0, 1], stems]]
+      drums:
+        flip:
+          pad: [1.828, channels: [[2, 3], stems]]
+      vocal:
+        flip:
+          pad: [1.828, channels: [[4, 5], stems]]
+      other:
+        flip:
+          pad: [1.828, channels: [[6, 7], stems]]
 parts:
   drums:
     drums:
       kicks: 1
+      mode: elite
+  bass:
+    pro-guitar:
+      tuning:
+        base: bass-4

@@ -9,8 +9,14 @@ global:
   autogen-theme: PsychJamRock
 audio:
   album-track:
-    md5: e13f17dbf41114387db562bc8c017f79
+    # older md5: e13f17dbf41114387db562bc8c017f79
+    md5: 43e3f1c121954dd8c6d034f641afbe20
     frames: 14327208
+  stems:
+    file-path: audio-stems.wav
+    commands:
+    - ../../../scripts/stems AUDIO(album-track) audio-stems.wav
+    channels: 8
   hihat:
     file-path: ../../../sound/hihat-foot.wav
   countin:
@@ -19,14 +25,38 @@ plans:
   album:
     song:
       mix:
-      - pad: [2.675, album-track]
+      - flip: {pad: [2.675, album-track]}
       - countin
+  dev:
+    song:
+      flip:
+        pad: [2.675, album-track]
+    parts:
+      bass:
+        flip:
+          pad: [2.675, channels: [[0, 1], stems]]
+      drums:
+        flip:
+          pad: [2.675, channels: [[2, 3], stems]]
+      vocal:
+        flip:
+          pad: [2.675, channels: [[4, 5], stems]]
+      other:
+        flip:
+          pad: [2.675, channels: [[6, 7], stems]]
 parts:
   drums:
     drums:
       kicks: both # briefly!
+      mode: elite
 targets:
   rb3:
     game: rb3
+    plan: album
+  rb3-2x:
+    game: rb3
+    2x-bass-pedal: true
+    plan: album
   ps:
     game: ps
+    plan: album

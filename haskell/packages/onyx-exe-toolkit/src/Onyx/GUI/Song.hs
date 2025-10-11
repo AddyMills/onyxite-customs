@@ -100,15 +100,16 @@ songPageRB3 sink rect tab proj build = mdo
         )
       liftIO $ FL.setCallback counterSpeed $ \_ -> controlInput
       liftIO $ FL.setCallback box2x $ \_ -> controlInput
-  let makeTarget newPreferences = do
+  let makeTarget :: Preferences -> IO (TargetRB3 FilePath)
+      makeTarget newPreferences = do
         modifier <- targetModifier
         return $ modifier def
-          { magma = prefMagma newPreferences
-          , legalTempos = prefLegalTempos newPreferences
+          { magma = newPreferences.prefMagma
+          , legalTempos = newPreferences.prefLegalTempos
           , common = def
-            { label2x = prefLabel2x newPreferences
+            { label2x = newPreferences.prefLabel2x
             }
-          , encoding = prefRB3Encoding newPreferences
+          , encoding = newPreferences.prefRB3Encoding
           }
       makeFinalTarget = readPreferences >>= stackIO . makeTarget
   fullWidth 35 $ \rect' -> do
@@ -119,7 +120,7 @@ songPageRB3 sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save RB3 CON file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_rb3con" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -133,7 +134,7 @@ songPageRB3 sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save RB3 PKG file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> ".pkg" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -151,7 +152,7 @@ songPageRB3 sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save Magma v2 project"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_project" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -225,15 +226,16 @@ songPageRB2 sink rect tab proj build = mdo
         )
       liftIO $ FL.setCallback counterSpeed $ \_ -> controlInput
       liftIO $ FL.setCallback box2x $ \_ -> controlInput
-  let makeTarget newPreferences = do
+  let makeTarget :: Preferences -> IO (TargetRB2 FilePath)
+      makeTarget newPreferences = do
         modifier <- targetModifier
         return $ modifier def
-          { magma = prefMagma newPreferences
-          , legalTempos = prefLegalTempos newPreferences
+          { magma = newPreferences.prefMagma
+          , legalTempos = newPreferences.prefLegalTempos
           , common = def
-            { label2x = prefLabel2x newPreferences
+            { label2x = newPreferences.prefLabel2x
             }
-          , ps3Encrypt = prefPS3Encrypt newPreferences
+          , ps3Encrypt = newPreferences.prefPS3Encrypt
           }
       makeFinalTarget = readPreferences >>= stackIO . makeTarget
 
@@ -244,7 +246,7 @@ songPageRB2 sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save RB2 CON file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_rb2con" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -301,8 +303,8 @@ songPageGHWOR sink rect tab proj build = mdo
       return counter
     fullWidth 35 $ \rect' -> do
       getProTo4 <- liftIO $ horizRadio rect'
-        [ ("Pro Drums to 5 lane", False, not $ prefGH4Lane ?preferences)
-        , ("Pro Drums to 4 lane", True, prefGH4Lane ?preferences)
+        [ ("Pro Drums to 5 lane", False, not ?preferences.prefGH4Lane)
+        , ("Pro Drums to 4 lane", True, ?preferences.prefGH4Lane)
         ]
       tell $ do
         b <- getProTo4
@@ -348,7 +350,7 @@ songPageGHWOR sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save GH:WoR LIVE file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_ghwor" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -362,7 +364,7 @@ songPageGHWOR sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save GH:WoR PKG file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> ".pkg" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -452,7 +454,7 @@ songPageRR sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save RR LIVE file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_rr" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -466,7 +468,7 @@ songPageRR sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save RR PKG file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> ".pkg" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -543,7 +545,7 @@ songPagePS sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save CH/PS song folder"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_chps" -- TODO add modifiers
-      forM_ (prefDirCH ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirCH $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -555,7 +557,7 @@ songPagePS sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save CH/PS .sng file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> ".sng" -- TODO add modifiers
-      forM_ (prefDirCH ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirCH $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -567,7 +569,7 @@ songPagePS sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save CH/PS zip file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_chps.zip" -- TODO add modifiers
-      forM_ (prefDirCH ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirCH $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -667,7 +669,7 @@ songPageGH3 sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save GH3 LIVE file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_gh3live" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -681,7 +683,7 @@ songPageGH3 sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save GH3 PKG file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> ".pkg" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()
@@ -754,8 +756,9 @@ songPageGH1 sink rect tab proj build = mdo
           }
         )
       liftIO $ FL.setCallback counterSpeed $ \_ -> controlInput
-  let initTarget prefs = (def :: TargetGH1 FilePath)
-        { offset = prefGH2Offset prefs
+  let initTarget :: Preferences -> TargetGH1 FilePath
+      initTarget prefs = (def :: TargetGH1 FilePath)
+        { offset = prefs.prefGH2Offset
         }
       makeTarget = fmap ($ initTarget ?preferences) targetModifier
       -- make sure we reload offset before compiling
@@ -877,8 +880,9 @@ songPageGH2 sink rect tab proj build = mdo
       tell $ getDeluxe >>= \opt -> return $ Endo $ \gh2 -> case opt of
         Nothing   -> gh2 { gh2Deluxe = False, is2xBassPedal = False }
         Just is2x -> gh2 { gh2Deluxe = True , is2xBassPedal = is2x  }
-  let initTarget prefs = (def :: TargetGH2 FilePath)
-        { offset = prefGH2Offset prefs
+  let initTarget :: Preferences -> TargetGH2 FilePath
+      initTarget prefs = (def :: TargetGH2 FilePath)
+        { offset = prefs.prefGH2Offset
         }
       makeTarget = fmap ($ initTarget ?preferences) targetModifier
       -- make sure we reload offset before compiling
@@ -917,7 +921,7 @@ songPageGH2 sink rect tab proj build = mdo
       picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
       FL.setTitle picker "Save GH2 LIVE file"
       FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_gh2live" -- TODO add modifiers
-      forM_ (prefDirRB ?preferences) $ FL.setDirectory picker . T.pack
+      forM_ ?preferences.prefDirRB $ FL.setDirectory picker . T.pack
       FL.showWidget picker >>= \case
         FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
           Nothing -> return ()

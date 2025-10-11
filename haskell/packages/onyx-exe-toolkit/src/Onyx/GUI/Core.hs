@@ -432,7 +432,7 @@ trimXbox
   :: Preferences
   -> FilePath
   -> FilePath
-trimXbox prefs f = if prefTrimXbox prefs
+trimXbox prefs f = if prefs.prefTrimXbox
   then validFileName NameRuleXbox f
   else f
 
@@ -463,7 +463,7 @@ gh2DeluxeSelector sink rect = do
 warnCombineXboxGH2 :: (Event -> IO ()) -> IO () -> IO ()
 warnCombineXboxGH2 sink go = sink $ EventOnyx $ do
   prefs <- readPreferences
-  stackIO $ unless (prefWarnedXboxGH2 prefs) $ do
+  stackIO $ unless prefs.prefWarnedXboxGH2 $ do
     void $ FL.flChoice (T.unlines
       [ "Note! When loading songs into Guitar Hero II for Xbox 360, you *must* combine them into packs (go to \"Quick convert\")."
       , "Loading more than 16 packages will fail to load some songs, and will corrupt your save!"
@@ -474,7 +474,7 @@ warnCombineXboxGH2 sink go = sink $ EventOnyx $ do
 warnXboxGHWoR :: (Event -> IO ()) -> Onyx () -> IO ()
 warnXboxGHWoR sink go = sink $ EventOnyx $ do
   prefs <- readPreferences
-  stackIO $ unless (prefWarnedXboxWoR prefs) $ do
+  stackIO $ unless prefs.prefWarnedXboxWoR $ do
     void $ FL.flChoice (T.unlines
       [ "Please use the \"WoR Song Cache\" tab in Other Tools after conversion,"
       , "to produce the extra file needed to load your songs."
@@ -800,7 +800,7 @@ songIDBox rect f = do
       then case readMaybe $ T.unpack s of
         Nothing -> SongIDSymbol s
         Just i  -> SongIDInt i
-      else if prefRBNumberID ?preferences
+      else if ?preferences.prefRBNumberID
         then SongIDAutoInt
         else SongIDAutoSymbol
 

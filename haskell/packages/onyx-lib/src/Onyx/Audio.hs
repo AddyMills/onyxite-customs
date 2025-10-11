@@ -7,6 +7,7 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE LambdaCase               #-}
 {-# LANGUAGE MultiWayIf               #-}
+{-# LANGUAGE OverloadedRecordDot      #-}
 {-# LANGUAGE OverloadedStrings        #-}
 {-# LANGUAGE PatternSynonyms          #-}
 {-# LANGUAGE TupleSections            #-}
@@ -678,7 +679,7 @@ sinkMP3PadWithHandle out setup src = sinkMP3WithHandle out setup $ padStart mp3E
 runAudio :: (SendMessage m, MonadIO m) => AudioSource (ResourceT IO) Float -> FilePath -> StackTraceT m ()
 runAudio src out = do
   lg $ "Writing audio to " ++ out
-  oggQuality <- prefOGGQuality <$> readPreferences
+  oggQuality <- (.prefOGGQuality) <$> readPreferences
   inside ("Writing audio to " ++ out) $ stackIO $ audioIO (Just oggQuality) src out
   lg $ "Finished writing audio to " ++ out
 

@@ -46,7 +46,7 @@ batchPagePreview sink rect tab build = do
   makeTemplateRunner
     sink
     "Build web previews"
-    (maybe "%input_dir%" T.pack (prefDirPreview ?preferences) <> "/%input_base%_player")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirPreview <> "/%input_base%_player")
     (\template -> build $ \proj -> T.unpack $ templateApplyInput proj Nothing template)
   FL.end pack
   FL.setResizable tab $ Just pack
@@ -101,14 +101,14 @@ batchPageRB3 sink rect tab build = do
           tgt = preset yaml defRB3
             { common = defRB3.common
               { speed = Just speed
-              , label2x = prefLabel2x newPreferences
+              , label2x = newPreferences.prefLabel2x
               }
-            , legalTempos = prefLegalTempos newPreferences
-            , magma = prefMagma newPreferences
-            , songID = if prefRBNumberID newPreferences
+            , legalTempos = newPreferences.prefLegalTempos
+            , magma = newPreferences.prefMagma
+            , songID = if newPreferences.prefRBNumberID
               then SongIDAutoInt
               else SongIDAutoSymbol
-            , encoding = prefRB3Encoding newPreferences
+            , encoding = newPreferences.prefRB3Encoding
             }
           -- TODO need to use anyDrums
           kicksConfigs = case (kicks, maybe Kicks1x (.kicks) $ getPart F.PartDrums yaml >>= (.drums)) of
@@ -140,19 +140,19 @@ batchPageRB3 sink rect tab build = do
   makeTemplateRunner
     sink
     "Create Xbox 360 CON files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%_rb3con")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%_rb3con")
     (\template -> sink $ EventOnyx $ getTargetSong True RB3CON template >>= \(qcPossible, x) -> stackIO $ build qcPossible x)
   makeTemplateRunner
     sink
     "Create PS3 PKG files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%.pkg")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%.pkg")
     (\template -> sink $ EventOnyx $ getTargetSong False RB3PKG template >>= \(qcPossible, x) -> stackIO $ build qcPossible x)
   batchButtonLoosePS3 sink $ \dout -> do
     sink $ EventOnyx $ getTargetSong False (const $ RB3LoosePS3 dout) "" >>= \(qcPossible, x) -> stackIO $ build qcPossible x
   makeTemplateRunner
     sink
     "Create Magma projects"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%_project")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%_project")
     (\template -> sink $ EventOnyx $ getTargetSong False RB3Magma template >>= \(_, x) -> stackIO $ build False x)
   FL.end pack
   FL.setResizable tab $ Just pack
@@ -186,7 +186,7 @@ batchPageGH1 sink rect tab build = do
               { speed = Just speed
               }
             , guitar = fromMaybe (F.PartName "undefined") leadPart
-            , offset = prefGH2Offset newPrefs
+            , offset = newPrefs.prefGH2Offset
             }
           fout = T.unpack $ foldr ($) template
             [ templateApplyInput proj $ Just $ GH1 tgt
@@ -282,12 +282,12 @@ batchPageGH3 sink rect tab build = do
   makeTemplateRunner
     sink
     "Create Xbox 360 LIVE files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%_gh3live")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%_gh3live")
     (\template -> getTargetSong True GH3LIVE template build)
   makeTemplateRunner
     sink
     "Create PS3 PKG files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%.pkg")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%.pkg")
     (\template -> getTargetSong False GH3PKG template build)
   batchButtonLoosePS3 sink $ \dout -> do
     sink $ EventIO $ getTargetSong False (const $ GH3LoosePS3 dout) "" build
@@ -350,7 +350,7 @@ batchPageGH2 sink rect tab build = do
             , coop = case coopPart of
               Just (_, coop) -> coop
               _              -> defGH2.coop
-            , offset = prefGH2Offset newPrefs
+            , offset = newPrefs.prefGH2Offset
             , gh2Deluxe = isJust deluxe2x
             , is2xBassPedal = fromMaybe False deluxe2x
             }
@@ -388,7 +388,7 @@ batchPageGH2 sink rect tab build = do
   makeTemplateRunner
     sink
     "Create Xbox 360 LIVE files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%_gh2live")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%_gh2live")
     (\template -> warnCombineXboxGH2 sink $ getTargetSong True GH2LIVE template build)
   FL.end pack
   FL.setResizable tab $ Just pack
@@ -408,8 +408,8 @@ batchPageGHWOR sink rect tab build = do
     in centerFixed rect' $ speedPercent True centerRect
   getProTo4 <- padded 5 10 5 10 (Size (Width 800) (Height 35)) $ \rect' -> do
     fn <- horizRadio rect'
-      [ ("Pro Drums to 5 lane", False, not $ prefGH4Lane ?preferences)
-      , ("Pro Drums to 4 lane", True, prefGH4Lane ?preferences)
+      [ ("Pro Drums to 5 lane", False, not ?preferences.prefGH4Lane)
+      , ("Pro Drums to 4 lane", True, ?preferences.prefGH4Lane)
       ]
     return $ fromMaybe False <$> fn
   let getTargetSong isXbox usePath template = do
@@ -454,12 +454,12 @@ batchPageGHWOR sink rect tab build = do
   makeTemplateRunner
     sink
     "Create Xbox 360 LIVE files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%_ghwor")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%_ghwor")
     (\template -> warnXboxGHWoR sink $ getTargetSong True GHWORLIVE template >>= stackIO . build)
   makeTemplateRunner
     sink
     "Create PS3 PKG files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%.pkg")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%.pkg")
     (\template -> warnXboxGHWoR sink $ getTargetSong False GHWORPKG template >>= stackIO . build)
   batchButtonLoosePS3 sink $ \dout -> do
     warnXboxGHWoR sink $ getTargetSong False (const $ GHWORLoosePS3 dout) "" >>= stackIO . build
@@ -527,12 +527,12 @@ batchPageRR sink rect tab build = do
   makeTemplateRunner
     sink
     "Create Xbox 360 LIVE files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%_rr")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%_rr")
     (\template -> sink $ EventOnyx $ getTargetSong True RRLIVE template >>= stackIO . build)
   makeTemplateRunner
     sink
     "Create RPCS3 PKG files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%.pkg")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%.pkg")
     (\template -> sink $ EventOnyx $ getTargetSong False RRPKG template >>= stackIO . build)
   FL.end pack
   FL.setResizable tab $ Just pack
@@ -568,14 +568,14 @@ batchPageRB2 sink rect tab build = do
           tgt = preset yaml def
             { common      = (def :: TargetRB2 FilePath).common
               { speed   = Just speed
-              , label2x = prefLabel2x newPreferences
+              , label2x = newPreferences.prefLabel2x
               }
-            , legalTempos = prefLegalTempos newPreferences
-            , magma       = prefMagma newPreferences
-            , songID      = if prefRBNumberID newPreferences
+            , legalTempos = newPreferences.prefLegalTempos
+            , magma       = newPreferences.prefMagma
+            , songID      = if newPreferences.prefRBNumberID
               then SongIDAutoInt
               else SongIDAutoSymbol
-            , ps3Encrypt  = prefPS3Encrypt newPreferences
+            , ps3Encrypt  = newPreferences.prefPS3Encrypt
             }
           -- TODO need to use anyDrums
           kicksConfigs = case (kicks, maybe Kicks1x (.kicks) $ getPart F.PartDrums yaml >>= (.drums)) of
@@ -606,12 +606,12 @@ batchPageRB2 sink rect tab build = do
   makeTemplateRunner
     sink
     "Create Xbox 360 CON files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%_rb2con")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%_rb2con")
     (\template -> sink $ EventOnyx $ getTargetSong True RB2CON template >>= stackIO . build)
   makeTemplateRunner
     sink
     "Create PS3 PKG files"
-    (maybe "%input_dir%" T.pack (prefDirRB ?preferences) <> "/%input_base%%modifiers%.pkg")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirRB <> "/%input_base%%modifiers%.pkg")
     (\template -> sink $ EventOnyx $ getTargetSong False RB2PKG template >>= stackIO . build)
   batchButtonLoosePS3 sink $ \dout -> do
     sink $ EventOnyx $ getTargetSong False (const $ RB2LoosePS3 dout) "" >>= stackIO . build
@@ -655,17 +655,17 @@ batchPagePS sink rect tab build = do
   makeTemplateRunner
     sink
     "Create CH folders"
-    (maybe "%input_dir%" T.pack (prefDirCH ?preferences) <> "/%artist% - %title%")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirCH <> "/%artist% - %title%")
     (getTargetSong PSDir >=> build)
   makeTemplateRunner
     sink
     "Create CH .sng files"
-    (maybe "%input_dir%" T.pack (prefDirCH ?preferences) <> "/%artist% - %title%.sng")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirCH <> "/%artist% - %title%.sng")
     (getTargetSong PSSng >=> build)
   makeTemplateRunner
     sink
     "Create CH zips"
-    (maybe "%input_dir%" T.pack (prefDirCH ?preferences) <> "/%input_base%%modifiers%_ps.zip")
+    (maybe "%input_dir%" T.pack ?preferences.prefDirCH <> "/%input_base%%modifiers%_ps.zip")
     (getTargetSong PSZip >=> build)
   FL.end pack
   FL.setResizable tab $ Just pack

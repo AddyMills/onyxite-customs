@@ -229,18 +229,18 @@ importWithPreferences imp = do
       prefs <- readPreferences
       let applyBlackVenue, applyDecryptSilent, applyDetectMuted
             :: SongYaml FilePath -> SongYaml FilePath
-          applyBlackVenue yaml = if prefBlackVenue prefs
+          applyBlackVenue yaml = if prefs.prefBlackVenue
             then yaml { global = yaml.global { autogenTheme = Nothing } }
             else yaml
           applyDecryptSilent yaml = yaml
             { plans = flip fmap yaml.plans $ \case
-              MoggPlan mogg -> MoggPlan mogg { decryptSilent = prefDecryptSilent prefs }
+              MoggPlan mogg -> MoggPlan mogg { decryptSilent = prefs.prefDecryptSilent }
               plan          -> plan
             }
           applyDetectMuted yaml = yaml
             { parts = flip fmap yaml.parts $ \part -> part
               { grybo = flip fmap part.grybo $ \grybo -> grybo
-                { detectMutedOpens = prefDetectMuted prefs
+                { detectMutedOpens = prefs.prefDetectMuted
                 }
               }
             }
@@ -946,7 +946,7 @@ launchWindow sink makeMenuBar proj song maybeAudio albumArt isRB = mdo
                 (\_ -> return dummyHandle)
             Nothing -> return dummyHandle
           curTime <- getTimeMonotonic
-          stopAnim <- startAnimation (recip $ realToFrac $ prefPreviewFPS ?preferences) $ do
+          stopAnim <- startAnimation (recip $ realToFrac ?preferences.prefPreviewFPS) $ do
             t' <- currentSongTime <$> getTimeMonotonic <*> readIORef varTime
             -- first draw a new frame
             _ <- FLTK.lock
@@ -1185,7 +1185,7 @@ launchWindow sink makeMenuBar proj song maybeAudio albumArt isRB = mdo
             PSZip _ -> "Building CH/PS zip file"
             PSSng _ -> "Building CH/PS .sng file"
           tgt' = (tgt :: TargetPS FilePath)
-            { audioFormat = case prefCHAudioFormat newPreferences of
+            { audioFormat = case newPreferences.prefCHAudioFormat of
               CHAudioOggVorbis -> "ogg"
               CHAudioOpus      -> "opus"
             }
@@ -1321,7 +1321,7 @@ launchWindow sink makeMenuBar proj song maybeAudio albumArt isRB = mdo
         picker <- FL.nativeFileChooserNew $ Just FL.BrowseSaveFile
         FL.setTitle picker "Save web preview folder"
         FL.setPresetFile picker $ T.pack $ projectTemplate proj <> "_player"
-        forM_ (prefDirPreview ?preferences) $ FL.setDirectory picker . T.pack
+        forM_ ?preferences.prefDirPreview $ FL.setDirectory picker . T.pack
         FL.showWidget picker >>= \case
           FL.NativeFileChooserPicked -> (fmap T.unpack <$> FL.getFilename picker) >>= \case
             Nothing -> return ()
@@ -1980,7 +1980,7 @@ pageQuickConvertRB sink rect tab startTasks = mdo
       (ps3EncryptArea, ps3FolderArea) = chopLeft 225 ps3OptionsArea
       makeCheckEncrypt = do
         btn <- FL.checkButtonNew ps3EncryptArea $ Just "Encrypt .mid.edat"
-        void $ FL.setValue btn $ prefPS3Encrypt ?preferences
+        void $ FL.setValue btn ?preferences.prefPS3Encrypt
         return $ FL.getValue btn
       makeFormatSelect :: IO () -> IO () -> IO () -> IO () -> IO (IO QuickConvertFormatOutput)
       makeFormatSelect ps3On ps3Off foldersOn foldersOff = do
@@ -2357,7 +2357,7 @@ pageQuickConvertRB sink rect tab startTasks = mdo
       files <- readMVar loadedFiles
       tryPreview <- FL.getValue boxPrev
       songTransform <- getSongTransform
-      askFolder (prefDirWii ?preferences) $ \dout -> sink $ EventOnyx $ startTasks $ let
+      askFolder ?preferences.prefDirWii $ \dout -> sink $ EventOnyx $ startTasks $ let
         settings = QuickDolphinSettings
           { qcDolphinPreview = tryPreview
           }
@@ -3390,7 +3390,7 @@ previewGroup sink rect getSong getTime getSpeed getAudioHandle = do
           let flatTrks = concat trks
           -- Get current audio handle for waveform visualization
           mAudioHandle <- getAudioHandle
-          RGGraphics.drawTracks stuff (RGGraphics.WindowDims w h) t speed bg (prefEliteLayout ?preferences)
+          RGGraphics.drawTracks stuff (RGGraphics.WindowDims w h) t speed bg ?preferences.prefEliteLayout
             (flip mapMaybe selected $ \name -> (name,) <$> lookup name flatTrks)
             mAudioHandle
   -- TODO add an option to use `FLTK.setUseHighResGL True`
@@ -3497,7 +3497,7 @@ _promptPreview sink makeMenuBar = sink $ EventIO $ do
 -}
 
 applyDownmix :: Preferences -> SongYaml f -> SongYaml f
-applyDownmix prefs song = if prefCHDownmix prefs
+applyDownmix prefs song = if prefs.prefCHDownmix
   then mixDownStems song
   else song
 
@@ -3666,7 +3666,7 @@ launchBatch sink makeMenuBar startFiles = mdo
         startTasks $ zip (map impPath files) $ flip map files $ \f -> doImport f $ \proj -> do
           let (target, creator) = settings proj
               target' = (target :: TargetPS FilePath)
-                { audioFormat = case prefCHAudioFormat newPreferences of
+                { audioFormat = case newPreferences.prefCHAudioFormat of
                   CHAudioOggVorbis -> "ogg"
                   CHAudioOpus      -> "opus"
                 }
@@ -3935,7 +3935,7 @@ launchPreferences sink makeMenuBar = do
         [ lineBox $ \box -> do
           let [checkBox, _, counterBox, _] = splitHorizN 4 box
           check <- FL.checkButtonNew checkBox $ Just "Unlimited cores"
-          void $ FL.setValue check $ isNothing $ prefThreads loadedPrefs
+          void $ FL.setValue check $ isNothing loadedPrefs.prefThreads
           counter <- FL.counterNew counterBox $ Just "Core limit"
           FL.setLabeltype counter FLE.NormalLabelType FL.ResolveImageLabelDoNothing
           FL.setAlign counter $ FLE.Alignments [FLE.AlignTypeLeft]
@@ -3943,7 +3943,7 @@ launchPreferences sink makeMenuBar = do
           FL.setStep counter 1
           FL.setMinimum counter 1
           FL.setMaximum counter 16
-          void $ FL.setValue counter $ maybe 1 fromIntegral $ prefThreads loadedPrefs
+          void $ FL.setValue counter $ maybe 1 fromIntegral loadedPrefs.prefThreads
           let updateCounter = FL.getValue check >>= \case
                 True  -> FL.deactivate counter
                 False -> FL.activate   counter
@@ -3960,7 +3960,7 @@ launchPreferences sink makeMenuBar = do
             , "Instead of always becoming green, these open notes will become the lowest note of the following chord,"
             , "or of the preceding chord if it is closer to the open notes."
             ]
-          void $ FL.setValue check $ prefDetectMuted loadedPrefs
+          void $ FL.setValue check loadedPrefs.prefDetectMuted
           return $ (\b prefs -> prefs { prefDetectMuted = b }) <$> FL.getValue check
         ]
       FL.end pack
@@ -3971,18 +3971,18 @@ launchPreferences sink makeMenuBar = do
         fn <- combinePrefs <$> sequence
           [ do
             getMagma <- lineBox $ \box -> horizRadio box
-              [ ("Magma required" , MagmaRequire, prefMagma loadedPrefs == MagmaRequire)
-              , ("Magma optional" , MagmaTry    , prefMagma loadedPrefs == MagmaTry    )
-              , ("Don't use Magma", MagmaDisable, prefMagma loadedPrefs == MagmaDisable)
+              [ ("Magma required" , MagmaRequire, loadedPrefs.prefMagma == MagmaRequire)
+              , ("Magma optional" , MagmaTry    , loadedPrefs.prefMagma == MagmaTry    )
+              , ("Don't use Magma", MagmaDisable, loadedPrefs.prefMagma == MagmaDisable)
               ]
             return $ maybe id (\v prefs -> prefs { prefMagma = v }) <$> getMagma
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Always export black VENUE track"
-            void $ FL.setValue check $ prefBlackVenue loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefBlackVenue
             return $ (\b prefs -> prefs { prefBlackVenue = b }) <$> FL.getValue check
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Label 2x kick charts as (2x Bass Pedal) by default"
-            void $ FL.setValue check $ prefLabel2x loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefLabel2x
             return $ (\b prefs -> prefs { prefLabel2x = b }) <$> FL.getValue check
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Modify tempos in RB export to follow Magma rules"
@@ -3990,15 +3990,15 @@ launchPreferences sink makeMenuBar = do
               [ "Magma requires MIDI files to use tempos in the range of 40 to 300 BPM."
               , "This is a more restricted range than the games actually require."
               ]
-            void $ FL.setValue check $ prefLegalTempos loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefLegalTempos
             return $ (\b prefs -> prefs { prefLegalTempos = b }) <$> FL.getValue check
           , do
             getRB3Encoding <- lineBox $ \box -> do
               let (boxA, boxB) = chopLeft 230 box
               _ <- FL.boxNew boxA $ Just "RB3 recompile .dta"
               horizRadio boxB
-                [ ("Latin-1", Latin1, prefRB3Encoding loadedPrefs == Latin1)
-                , ("UTF-8"  , UTF8  , prefRB3Encoding loadedPrefs == UTF8  )
+                [ ("Latin-1", Latin1, loadedPrefs.prefRB3Encoding == Latin1)
+                , ("UTF-8"  , UTF8  , loadedPrefs.prefRB3Encoding == UTF8  )
                 ]
             return $ maybe id (\v prefs -> prefs { prefRB3Encoding = v }) <$> getRB3Encoding
           , do
@@ -4006,9 +4006,9 @@ launchPreferences sink makeMenuBar = do
               let (boxA, boxB) = chopLeft 230 box
               _ <- FL.boxNew boxA $ Just "RB3 pack .dta"
               horizRadio boxB
-                [ ("Latin-1", Just Latin1, prefPackEncoding loadedPrefs == Just Latin1)
-                , ("UTF-8"  , Just UTF8  , prefPackEncoding loadedPrefs == Just UTF8  )
-                , ("As is"  , Nothing    , prefPackEncoding loadedPrefs == Nothing    )
+                [ ("Latin-1", Just Latin1, loadedPrefs.prefPackEncoding == Just Latin1)
+                , ("UTF-8"  , Just UTF8  , loadedPrefs.prefPackEncoding == Just UTF8  )
+                , ("As is"  , Nothing    , loadedPrefs.prefPackEncoding == Nothing    )
                 ]
             return $ maybe id (\v prefs -> prefs { prefPackEncoding = v }) <$> getPackEncoding
           ]
@@ -4029,15 +4029,15 @@ launchPreferences sink makeMenuBar = do
               , "Positive values mean audio will be pulled earlier, to account for delay."
               , "Negative values mean audio will be pushed later."
               ]
-            void $ FL.setValue gh2OffsetCounter $ prefGH2Offset loadedPrefs * 1000
+            void $ FL.setValue gh2OffsetCounter $ loadedPrefs.prefGH2Offset * 1000
             return $ (\ms prefs -> prefs { prefGH2Offset = ms / 1000 }) <$> FL.getValue gh2OffsetCounter
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Sort GH2 bonus songs when adding to .ARK"
-            void $ FL.setValue check $ prefSortGH2 loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefSortGH2
             return $ (\b prefs -> prefs { prefSortGH2 = b }) <$> FL.getValue check
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "For GH2 and GH3, sort by artist first (instead of title)"
-            void $ FL.setValue check $ prefArtistSort loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefArtistSort
             FL.setTooltip check $ T.unwords
               [ "This affects GH2 .ARK bonus songs (when the above box is checked)"
               , "and GH3 DLC (as sorted in the Song Cache file)."
@@ -4050,16 +4050,16 @@ launchPreferences sink makeMenuBar = do
         pack <- FL.packNew rect Nothing
         fn <- combinePrefs <$> sequence
           [ do
-            getDir <- lineBox $ \box -> folderBox box "Default CH folder" $ T.pack $ fromMaybe "" $ prefDirCH loadedPrefs
+            getDir <- lineBox $ \box -> folderBox box "Default CH folder" $ T.pack $ fromMaybe "" loadedPrefs.prefDirCH
             return $ (\mdir prefs -> prefs { prefDirCH = mdir }) <$> getDir
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Mix down stems in CH output"
-            void $ FL.setValue check $ prefCHDownmix loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefCHDownmix
             return $ (\b prefs -> prefs { prefCHDownmix = b }) <$> FL.getValue check
           , do
             audioFormat <- lineBox $ \box -> horizRadio box
-              [ ("Output Ogg Vorbis audio", CHAudioOggVorbis, prefCHAudioFormat loadedPrefs == CHAudioOggVorbis)
-              , ("Output Opus audio"      , CHAudioOpus     , prefCHAudioFormat loadedPrefs == CHAudioOpus     )
+              [ ("Output Ogg Vorbis audio", CHAudioOggVorbis, loadedPrefs.prefCHAudioFormat == CHAudioOggVorbis)
+              , ("Output Opus audio"      , CHAudioOpus     , loadedPrefs.prefCHAudioFormat == CHAudioOpus     )
               ]
             return $ maybe id (\v prefs -> prefs { prefCHAudioFormat = v }) <$> audioFormat
           ]
@@ -4069,11 +4069,11 @@ launchPreferences sink makeMenuBar = do
         pack <- FL.packNew rect Nothing
         fn <- combinePrefs <$> sequence
           [ do
-            getDir <- lineBox $ \box -> folderBox box "Default CON/LIVE folder" $ T.pack $ fromMaybe "" $ prefDirRB loadedPrefs
+            getDir <- lineBox $ \box -> folderBox box "Default CON/LIVE folder" $ T.pack $ fromMaybe "" loadedPrefs.prefDirRB
             return $ (\mdir prefs -> prefs { prefDirRB = mdir }) <$> getDir
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Ensure valid filenames for Xbox 360 USB or HDD drives"
-            void $ FL.setValue check $ prefTrimXbox loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefTrimXbox
             FL.setTooltip check $ T.unwords
               [ "When checked, the filenames of CON or LIVE files will be trimmed to a"
               , "max of 42 characters, and will also have plus and comma characters"
@@ -4082,7 +4082,7 @@ launchPreferences sink makeMenuBar = do
             return $ (\b prefs -> prefs { prefTrimXbox = b }) <$> FL.getValue check
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Use true number IDs instead of symbols on Xbox 360 RB files"
-            void $ FL.setValue check $ prefRBNumberID loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefRBNumberID
             FL.setTooltip check $ T.unwords
               [ "When checked, Rock Band files will use a random integer for song_id."
               , "Otherwise, an 'o' is prefixed to form a symbol, and the game will"
@@ -4099,7 +4099,7 @@ launchPreferences sink makeMenuBar = do
         fn <- combinePrefs <$> sequence
           [ do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Encrypt .mid.edat files for PS3"
-            void $ FL.setValue check $ prefPS3Encrypt loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefPS3Encrypt
             FL.setTooltip check $ T.unwords
               [ "When checked, .mid.edat files for PS3 customs will be encrypted."
               , "This is required for a real console, but optional (and can be less"
@@ -4107,7 +4107,7 @@ launchPreferences sink makeMenuBar = do
               ]
             return $ (\b prefs -> prefs { prefPS3Encrypt = b }) <$> FL.getValue check
           , do
-            getDir <- lineBox $ \box -> folderBox box "PS3/RPCS3 install folder" $ T.pack $ fromMaybe "" $ prefDirPS3 loadedPrefs
+            getDir <- lineBox $ \box -> folderBox box "PS3/RPCS3 install folder" $ T.pack $ fromMaybe "" loadedPrefs.prefDirPS3
             return $ (\mdir prefs -> prefs { prefDirPS3 = mdir }) <$> getDir
           -- TODO default PKG output folder
           ]
@@ -4117,7 +4117,7 @@ launchPreferences sink makeMenuBar = do
         pack <- FL.packNew rect Nothing
         fn <- combinePrefs <$> sequence
           [ do
-            getDir <- lineBox $ \box -> folderBox box "Default Wii .app folder" $ T.pack $ fromMaybe "" $ prefDirWii loadedPrefs
+            getDir <- lineBox $ \box -> folderBox box "Default Wii .app folder" $ T.pack $ fromMaybe "" loadedPrefs.prefDirWii
             return $ (\mdir prefs -> prefs { prefDirWii = mdir }) <$> getDir
           ]
         FL.end pack
@@ -4127,16 +4127,16 @@ launchPreferences sink makeMenuBar = do
         fn <- combinePrefs <$> sequence
           [ do
             getMSAA <- lineBox $ \box -> horizRadio box
-              [ ("No MSAA" , Nothing, prefMSAA loadedPrefs == Nothing)
-              , ("MSAA 2x" , Just 2 , prefMSAA loadedPrefs == Just 2 )
-              , ("MSAA 4x" , Just 4 , prefMSAA loadedPrefs == Just 4 )
-              , ("MSAA 8x" , Just 8 , prefMSAA loadedPrefs == Just 8 )
-              , ("MSAA 16x", Just 16, prefMSAA loadedPrefs == Just 16)
+              [ ("No MSAA" , Nothing, loadedPrefs.prefMSAA == Nothing)
+              , ("MSAA 2x" , Just 2 , loadedPrefs.prefMSAA == Just 2 )
+              , ("MSAA 4x" , Just 4 , loadedPrefs.prefMSAA == Just 4 )
+              , ("MSAA 8x" , Just 8 , loadedPrefs.prefMSAA == Just 8 )
+              , ("MSAA 16x", Just 16, loadedPrefs.prefMSAA == Just 16)
               ]
             return $ maybe id (\v prefs -> prefs { prefMSAA = v }) <$> getMSAA
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "FXAA"
-            void $ FL.setValue check $ prefFXAA loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefFXAA
             return $ (\b prefs -> prefs { prefFXAA = b }) <$> FL.getValue check
           , lineBox $ \box -> do
             let [_, middleBox, _] = splitHorizN 3 box
@@ -4146,15 +4146,15 @@ launchPreferences sink makeMenuBar = do
             FL.setStep fpsCounter 1
             FL.setLstep fpsCounter 10
             FL.setMinimum fpsCounter 1
-            void $ FL.setValue fpsCounter $ fromIntegral $ prefPreviewFPS loadedPrefs
+            void $ FL.setValue fpsCounter $ fromIntegral loadedPrefs.prefPreviewFPS
             return $ (\n prefs -> prefs { prefPreviewFPS = round n }) <$> FL.getValue fpsCounter
           , lineBox $ \box -> do
             let [trimClock 0 5 0 0 -> box1, trimClock 0 0 0 5 -> box2] = splitHorizN 2 box
-                layoutLeftOpenHand = listToMaybe $ flip mapMaybe (prefEliteLayout loadedPrefs) $ \case
+                layoutLeftOpenHand = listToMaybe $ flip mapMaybe loadedPrefs.prefEliteLayout $ \case
                   EDLeftCrossHand -> Just False
                   EDLeftOpenHand  -> Just True
                   _               -> Nothing
-                layoutRightNearCrash = listToMaybe $ flip mapMaybe (prefEliteLayout loadedPrefs) $ \case
+                layoutRightNearCrash = listToMaybe $ flip mapMaybe loadedPrefs.prefEliteLayout $ \case
                   EDRightFarCrash  -> Just False
                   EDRightNearCrash -> Just True
                   _                -> Nothing
@@ -4183,6 +4183,10 @@ launchPreferences sink makeMenuBar = do
                     Just True  -> [EDRightNearCrash]
                   ]
                 }
+          , do
+            check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Audio waveform"
+            void $ FL.setValue check loadedPrefs.prefWaveform
+            return $ (\b prefs -> prefs { prefWaveform = b }) <$> FL.getValue check
           -- TODO lefty flip
           ]
         FL.end pack
@@ -4197,11 +4201,11 @@ launchPreferences sink makeMenuBar = do
             FL.setAlign sliderQuality $ FLE.Alignments [FLE.AlignTypeLeft]
             FL.setMinimum sliderQuality 0
             FL.setMaximum sliderQuality 10
-            void $ FL.setValue sliderQuality $ prefOGGQuality loadedPrefs * 10
+            void $ FL.setValue sliderQuality $ loadedPrefs.prefOGGQuality * 10
             return $ (\v prefs -> prefs { prefOGGQuality = v / 10 }) <$> FL.getValue sliderQuality
           , do
             check <- lineBox $ \box -> FL.checkButtonNew box $ Just "Treat undecryptable MOGGs as silent instead of an error"
-            void $ FL.setValue check $ prefDecryptSilent loadedPrefs
+            void $ FL.setValue check loadedPrefs.prefDecryptSilent
             return $ (\b prefs -> prefs { prefDecryptSilent = b }) <$> FL.getValue check
           ]
         FL.end pack
@@ -4226,7 +4230,7 @@ launchPreferences sink makeMenuBar = do
           continueSave = do
             savePreferences newPrefs
             FL.hide window
-      if prefMagma loadedPrefs == MagmaRequire && prefMagma newPrefs /= MagmaRequire
+      if loadedPrefs.prefMagma == MagmaRequire && newPrefs.prefMagma /= MagmaRequire
         then FL.flChoice magmaWarning "Cancel" (Just "OK") Nothing >>= \case
           1 -> continueSave
           _ -> return ()

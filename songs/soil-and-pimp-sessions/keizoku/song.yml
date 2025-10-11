@@ -14,6 +14,7 @@ global:
 audio:
   album-track:
     md5: 675dac1566809747687e43efe098918a
+    # other md5: e018e0b1a53e50a46b144b0e3d4685fe
     frames: 7890960
   stems:
     file-path: audio-stems.wav

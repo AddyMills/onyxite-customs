@@ -165,19 +165,21 @@ fixFileCaseMaybe :: (MonadIO m) => FilePath -> m (Maybe FilePath)
 fixFileCaseMaybe (dropTrailingPathSeparator -> f) = liftIO $ do
   let (dropTrailingPathSeparator -> dir, entry) = splitFileName f
   doesPathExist f >>= \case
-    True -> return $ Just f -- entry exists, no problem
+    True  -> return $ Just f -- entry exists, no problem
     False -> if f == dir
       then return Nothing -- we're at root, drive, or cwd, and it doesn't exist
       else fixFileCaseMaybe dir >>= \case
-        Nothing -> return Nothing -- dir doesn't exist
-        Just dir' -> do
-          -- dir exists, now we need to look for entry
-          entries <- listDirectory dir'
-          let compForm = T.toCaseFold . T.pack
-              entry' = compForm entry
-          case filter ((== entry') . compForm) entries of
-            []    -> return Nothing
-            e : _ -> return $ Just $ dir' </> e
+        Nothing   -> return Nothing -- dir doesn't exist
+        Just dir' -> Dir.doesDirectoryExist dir' >>= \case
+          False -> return Nothing -- it's a file, not a directory
+          True  -> do
+            -- dir exists, now we need to look for entry
+            entries <- listDirectory dir'
+            let compForm = T.toCaseFold . T.pack
+                entry' = compForm entry
+            case filter ((== entry') . compForm) entries of
+              []    -> return Nothing
+              e : _ -> return $ Just $ dir' </> e
 
 shortWindowsPath _ = return
 
