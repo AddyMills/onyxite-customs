@@ -336,6 +336,8 @@ data VenueTrack t = VenueTrack
 
   , venueFog              :: RTB.T t Bool
 
+  -- TODO [crowd_lighters_on]/[crowd_lighters_off] seen in Lane Breakers
+
   } deriving (Eq, Ord, Show, Generic)
     deriving (Semigroup, Monoid, Mergeable) via GenericMerge (VenueTrack t)
 

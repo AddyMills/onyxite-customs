@@ -24,6 +24,7 @@ library
     cbits/
   c-sources:
     cbits/ArkTool_v6.1/xyssl/aes.c
+    -- TODO the .cpp should all be under cxx-sources, but that causes link errors, not sure why
     cbits/ArkTool_v6.1/ArkFile.cpp
     cbits/ArkTool_v6.1/ArkHdrPair.cpp
     cbits/ArkTool_v6.1/DtbCrypt.cpp

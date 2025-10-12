@@ -1139,6 +1139,7 @@ drawFivePlay gl nowTime speed gps = do
   -- draw notes
   drawNotes farTime $ Map.toDescList zoomed
 
+-- TODO this needs lefty flip support
 drawPG :: GLStuff -> Double -> Double -> PG.GtrTuning -> Map.Map Double (CommonState (PGState Double)) -> IO ()
 drawPG gl nowTime speed tuning trk = do
   glUseProgram gl.objectShader
