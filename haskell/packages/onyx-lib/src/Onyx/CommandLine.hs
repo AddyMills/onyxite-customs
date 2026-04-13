@@ -1533,12 +1533,15 @@ commands =
               case coopBases of
                 [] -> return ()
                 _  -> do
-                  let base = sum coopBases
-                      mult n = floor (toRational base * n) :: Int
+                  let p2Base   = sum coopBases
+                      coopBase = maybe p2Base (+ p2Base) guitarBase
+                      mult n   = floor (toRational coopBase * n) :: Int
                   if baseOnly
-                    then putStrLn $ unwords [ show diff, "Coop:", "base=" <> show base ]
-                    else putStrLn $ unwords [ show diff, "Coop:", "base=" <> show base
-                                           , "5*(GH2)=" <> show (mult 2) ]
+                    then putStrLn $ unwords [ show diff, "Coop:", "rhythm-base=" <> show p2Base
+                                           , "coop-base=" <> show coopBase ]
+                    else putStrLn $ unwords [ show diff, "Coop:", "rhythm-base=" <> show p2Base
+                                           , "coop-base=" <> show coopBase
+                                           , "5*=" <> show (mult 2) ]
         return []
       _ -> fatal "Expected 1 argument (input midi)"
     }
